@@ -83,7 +83,9 @@ func JoinDotMap[K comparable, V DotStore](
 				Causal[V]{Store: va, Context: a.Context},
 				Causal[V]{Store: vb, Context: b.Context},
 			)
-			result.Set(k, joined.Store)
+			if joined.Store.Dots().Len() > 0 {
+				result.Set(k, joined.Store)
+			}
 		} else {
 			// Key only in a: join with empty (b's context still applies).
 			joined := joinV(

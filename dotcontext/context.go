@@ -76,7 +76,12 @@ func (c *CausalContext) Compact() {
 	for changed {
 		changed = false
 		for d := range c.outliers {
-			if d.Seq == c.vv[d.ID]+1 {
+			if d.Seq <= c.vv[d.ID] {
+				// Redundant: already covered by version vector.
+				delete(c.outliers, d)
+				changed = true
+			} else if d.Seq == c.vv[d.ID]+1 {
+				// Contiguous: promote into version vector.
 				c.vv[d.ID] = d.Seq
 				delete(c.outliers, d)
 				changed = true
