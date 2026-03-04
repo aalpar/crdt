@@ -7,13 +7,24 @@ package dotcontext
 // A dot survives if both sides have it (intersection), or one side has it
 // and the other's causal context hasn't observed it (difference).
 //
-// TODO(user): implement the three-term set formula.
 func JoinDotSet(a, b Causal[*DotSet]) Causal[*DotSet] {
 	result := NewDotSet()
 
-	// USER IMPLEMENTS THIS — ~10 lines
-	// Hint: iterate a.Store, iterate b.Store, apply the formula above.
-	_ = result
+	// Dots in a: keep if in b (intersection) or unobserved by b (s₁ \ c₂).
+	a.Store.Range(func(d Dot) bool {
+		if b.Store.Has(d) || !b.Context.Has(d) {
+			result.Add(d)
+		}
+		return true
+	})
+
+	// Dots only in b: keep if unobserved by a (s₂ \ c₁).
+	b.Store.Range(func(d Dot) bool {
+		if !a.Store.Has(d) && !a.Context.Has(d) {
+			result.Add(d)
+		}
+		return true
+	})
 
 	ctx := a.Context.Clone()
 	ctx.Merge(b.Context)

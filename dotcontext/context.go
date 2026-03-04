@@ -71,11 +71,18 @@ func (c *CausalContext) Merge(other *CausalContext) {
 // Compact promotes outliers into the version vector when they are
 // contiguous with the current frontier. Call this after batching
 // multiple Add or Merge operations.
-//
-// TODO(user): implement — promote outliers where seq == vv[id]+1
-// repeatedly until no more promotions are possible.
 func (c *CausalContext) Compact() {
-	// USER IMPLEMENTS THIS
+	changed := true
+	for changed {
+		changed = false
+		for d := range c.outliers {
+			if d.Seq == c.vv[d.ID]+1 {
+				c.vv[d.ID] = d.Seq
+				delete(c.outliers, d)
+				changed = true
+			}
+		}
+	}
 }
 
 // Clone returns a deep copy.
