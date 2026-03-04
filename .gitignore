@@ -1,4 +1,5 @@
 .serena/
-CLAUDE.local.md
 .idea/
+.claude/
+CLAUDE.local.md
 private/
