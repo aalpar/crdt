@@ -12,7 +12,7 @@
 
 - [x] `awset` — add-wins observed-remove set (`DotMap[K, *DotSet]`)
 - [x] `lwwregister` — last-writer-wins register (`DotFun[TimestampedValue]`)
-- [ ] `pncounter` — positive-negative counter (`DotFun[CounterValue]`)
+- [x] `pncounter` — positive-negative counter (`DotFun[CounterValue]`)
 - [ ] `ormap` — observed-remove map (`DotMap[K, V DotStore]`)
 
 ## Infrastructure
