@@ -50,6 +50,7 @@ fmt-check:
 .PHONY: clean
 clean:
 	$(GO) clean $(PACKAGES)
+	$(GO) clean -cache -testcache -modcache -fuzzcache
 
 .PHONY: tag
 tag:

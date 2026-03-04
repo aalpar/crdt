@@ -2,11 +2,14 @@ package dotcontext
 
 import "fmt"
 
+// ReplicaID identifies a replica in the system.
+type ReplicaID string
+
 // Dot is a unique event identifier: a (replica, sequence number) pair.
 // Each replica generates dots with monotonically increasing sequence numbers.
 type Dot struct {
-	ID  string // replica identifier
-	Seq uint64 // monotonically increasing per replica
+	ID  ReplicaID // replica identifier
+	Seq uint64    // monotonically increasing per replica
 }
 
 // String returns "id:seq".

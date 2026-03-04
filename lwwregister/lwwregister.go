@@ -29,12 +29,12 @@ func (t timestamped[V]) Join(other timestamped[V]) timestamped[V] {
 // Each write generates a single dot; after merge, multiple dots may
 // coexist (concurrent writes) and Value() resolves them.
 type LWWRegister[V any] struct {
-	id    string
+	id    dotcontext.ReplicaID
 	state dotcontext.Causal[*dotcontext.DotFun[timestamped[V]]]
 }
 
 // New creates an empty LWWRegister for the given replica.
-func New[V any](replicaID string) *LWWRegister[V] {
+func New[V any](replicaID dotcontext.ReplicaID) *LWWRegister[V] {
 	return &LWWRegister[V]{
 		id: replicaID,
 		state: dotcontext.Causal[*dotcontext.DotFun[timestamped[V]]]{

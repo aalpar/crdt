@@ -41,6 +41,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 | `lwwregister/` | `LWWRegister[V]` | `DotFun[timestamped[V]]` | Highest timestamp wins, tiebreak by replica ID |
 | `pncounter/` | `Counter` | `DotFun[counterValue]` | Sum of per-replica contributions |
 | `ormap/` | `ORMap[K, V]` | `DotMap[K, V DotStore]` | Add-wins keys, recursive value merge |
+| `ewflag/` | `EWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → enable wins |
 
 ### Key Design Decisions
 
@@ -58,6 +59,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 | `lwwregister/` | LWWRegister | 2 source + 1 test |
 | `pncounter/` | Counter | 2 source + 1 test |
 | `ormap/` | ORMap | 2 source + 1 test |
+| `ewflag/` | EWFlag | 2 source + 1 test |
 
 ## Testing
 

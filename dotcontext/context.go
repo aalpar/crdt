@@ -4,14 +4,14 @@ package dotcontext
 // It combines a version vector (replica → max contiguous sequence number)
 // with a set of outlier dots above the contiguous frontier.
 type CausalContext struct {
-	vv       map[string]uint64
+	vv       map[ReplicaID]uint64
 	outliers map[Dot]struct{}
 }
 
 // New returns an empty CausalContext.
 func New() *CausalContext {
 	return &CausalContext{
-		vv:       make(map[string]uint64),
+		vv:       make(map[ReplicaID]uint64),
 		outliers: make(map[Dot]struct{}),
 	}
 }
@@ -26,7 +26,7 @@ func (c *CausalContext) Has(d Dot) bool {
 }
 
 // Next returns the next dot for the given replica and adds it to the context.
-func (c *CausalContext) Next(id string) Dot {
+func (c *CausalContext) Next(id ReplicaID) Dot {
 	seq := c.vv[id] + 1
 	c.vv[id] = seq
 	return Dot{ID: id, Seq: seq}
@@ -34,7 +34,7 @@ func (c *CausalContext) Next(id string) Dot {
 
 // Max returns the maximum observed sequence number for a replica.
 // This includes outliers.
-func (c *CausalContext) Max(id string) uint64 {
+func (c *CausalContext) Max(id ReplicaID) uint64 {
 	max := c.vv[id]
 	for d := range c.outliers {
 		if d.ID == id && d.Seq > max {
@@ -92,15 +92,15 @@ func (c *CausalContext) Compact() {
 
 // ReplicaIDs returns all replica IDs known to this context.
 // This includes replicas from both the version vector and outliers.
-func (c *CausalContext) ReplicaIDs() []string {
-	seen := make(map[string]struct{}, len(c.vv))
+func (c *CausalContext) ReplicaIDs() []ReplicaID {
+	seen := make(map[ReplicaID]struct{}, len(c.vv))
 	for id := range c.vv {
 		seen[id] = struct{}{}
 	}
 	for d := range c.outliers {
 		seen[d.ID] = struct{}{}
 	}
-	ids := make([]string, 0, len(seen))
+	ids := make([]ReplicaID, 0, len(seen))
 	for id := range seen {
 		ids = append(ids, id)
 	}
@@ -110,7 +110,7 @@ func (c *CausalContext) ReplicaIDs() []string {
 // Clone returns a deep copy.
 func (c *CausalContext) Clone() *CausalContext {
 	cc := &CausalContext{
-		vv:       make(map[string]uint64, len(c.vv)),
+		vv:       make(map[ReplicaID]uint64, len(c.vv)),
 		outliers: make(map[Dot]struct{}, len(c.outliers)),
 	}
 	for id, seq := range c.vv {

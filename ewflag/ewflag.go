@@ -10,12 +10,12 @@ import (
 // Internally it is a bare DotSet paired with a causal context — the
 // simplest possible delta-state CRDT. A non-empty dot set means enabled.
 type EWFlag struct {
-	id    string
+	id    dotcontext.ReplicaID
 	state dotcontext.Causal[*dotcontext.DotSet]
 }
 
 // New creates a disabled EWFlag for the given replica.
-func New(replicaID string) *EWFlag {
+func New(replicaID dotcontext.ReplicaID) *EWFlag {
 	return &EWFlag{
 		id: replicaID,
 		state: dotcontext.Causal[*dotcontext.DotSet]{

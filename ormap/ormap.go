@@ -8,7 +8,7 @@ import (
 // of type V (any DotStore). Concurrent add and remove of the same
 // key resolves in favor of add.
 type ORMap[K comparable, V dotcontext.DotStore] struct {
-	id     string
+	id     dotcontext.ReplicaID
 	state  dotcontext.Causal[*dotcontext.DotMap[K, V]]
 	joinV  func(dotcontext.Causal[V], dotcontext.Causal[V]) dotcontext.Causal[V]
 	emptyV func() V
@@ -19,7 +19,7 @@ type ORMap[K comparable, V dotcontext.DotStore] struct {
 // joinV is the nested join function for merging values of type V.
 // emptyV returns a new empty value of type V.
 func New[K comparable, V dotcontext.DotStore](
-	replicaID string,
+	replicaID dotcontext.ReplicaID,
 	joinV func(dotcontext.Causal[V], dotcontext.Causal[V]) dotcontext.Causal[V],
 	emptyV func() V,
 ) *ORMap[K, V] {
@@ -47,7 +47,7 @@ func New[K comparable, V dotcontext.DotStore](
 //     captured automatically in the delta's context)
 //
 // Local state is mutated directly — no self-merge.
-func (m *ORMap[K, V]) Apply(key K, fn func(id string, ctx *dotcontext.CausalContext, v V, delta V)) *ORMap[K, V] {
+func (m *ORMap[K, V]) Apply(key K, fn func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v V, delta V)) *ORMap[K, V] {
 	v, ok := m.state.Store.Get(key)
 	if !ok {
 		v = m.emptyV()

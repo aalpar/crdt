@@ -11,7 +11,7 @@ import (
 //   seq     = byte % 8 + 1  (range 1..8)
 //   flags   = bit0: in store, bit1: in context (forced if bit0)
 
-var fuzzReplicas = []string{"a", "b", "c"}
+var fuzzReplicas = []ReplicaID{"a", "b", "c"}
 
 func parseCausalDotSet(data []byte) Causal[*DotSet] {
 	ds := NewDotSet()

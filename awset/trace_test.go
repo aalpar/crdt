@@ -34,7 +34,7 @@ func TestBaqueroDecompositionTrace(t *testing.T) {
 
 	assertHasElem(t, A, "x", "step 1: A should have x")
 	assertDots(t, A, "x", []dotcontext.Dot{{ID: "A", Seq: 1}}, "step 1: A.store[x]")
-	assertContext(t, A, map[string]uint64{"A": 1}, "step 1: A.context")
+	assertContext(t, A, map[dotcontext.ReplicaID]uint64{"A": 1}, "step 1: A.context")
 
 	// ── Step 2: B adds "x" concurrently ────────────────────────────
 	// B hasn't seen A's operation. B generates dot (B,1).
@@ -43,7 +43,7 @@ func TestBaqueroDecompositionTrace(t *testing.T) {
 
 	assertHasElem(t, B, "x", "step 2: B should have x")
 	assertDots(t, B, "x", []dotcontext.Dot{{ID: "B", Seq: 1}}, "step 2: B.store[x]")
-	assertContext(t, B, map[string]uint64{"B": 1}, "step 2: B.context")
+	assertContext(t, B, map[dotcontext.ReplicaID]uint64{"B": 1}, "step 2: B.context")
 
 	// ── Step 3: A and B merge ──────────────────────────────────────
 	// Both replicas exchange full states.
@@ -64,13 +64,13 @@ func TestBaqueroDecompositionTrace(t *testing.T) {
 		{ID: "A", Seq: 1},
 		{ID: "B", Seq: 1},
 	}, "step 3: A.store[x] after merge")
-	assertContext(t, A, map[string]uint64{"A": 1, "B": 1}, "step 3: A.context")
+	assertContext(t, A, map[dotcontext.ReplicaID]uint64{"A": 1, "B": 1}, "step 3: A.context")
 
 	assertDots(t, B, "x", []dotcontext.Dot{
 		{ID: "A", Seq: 1},
 		{ID: "B", Seq: 1},
 	}, "step 3: B.store[x] after merge")
-	assertContext(t, B, map[string]uint64{"A": 1, "B": 1}, "step 3: B.context")
+	assertContext(t, B, map[dotcontext.ReplicaID]uint64{"A": 1, "B": 1}, "step 3: B.context")
 
 	// ── Step 4: A removes "x" ──────────────────────────────────────
 	// A's remove delta has:
@@ -84,7 +84,7 @@ func TestBaqueroDecompositionTrace(t *testing.T) {
 	_ = deltaRm // we'll use this in step 7
 
 	assertNotHasElem(t, A, "x", "step 4: A should not have x")
-	assertContext(t, A, map[string]uint64{"A": 1, "B": 1}, "step 4: A.context unchanged")
+	assertContext(t, A, map[dotcontext.ReplicaID]uint64{"A": 1, "B": 1}, "step 4: A.context unchanged")
 
 	// ── Step 5: B adds "x" again (hasn't seen A's remove) ─────────
 	// B generates dot (B,2). B still has "x" → {(A,1),(B,1)} from step 3.
@@ -96,7 +96,7 @@ func TestBaqueroDecompositionTrace(t *testing.T) {
 		{ID: "B", Seq: 1},
 		{ID: "B", Seq: 2},
 	}, "step 5: B.store[x] after re-add")
-	assertContext(t, B, map[string]uint64{"A": 1, "B": 2}, "step 5: B.context")
+	assertContext(t, B, map[dotcontext.ReplicaID]uint64{"A": 1, "B": 2}, "step 5: B.context")
 
 	// ── Step 6: A merges B's add delta ─────────────────────────────
 	//
@@ -126,7 +126,7 @@ func TestBaqueroDecompositionTrace(t *testing.T) {
 	assertDots(t, A, "x", []dotcontext.Dot{
 		{ID: "B", Seq: 2},
 	}, "step 6: A.store[x] — only the new dot survives")
-	assertContext(t, A, map[string]uint64{"A": 1, "B": 2}, "step 6: A.context")
+	assertContext(t, A, map[dotcontext.ReplicaID]uint64{"A": 1, "B": 2}, "step 6: A.context")
 
 	// ── Step 7: C merges A's full state ────────────────────────────
 	//
@@ -143,7 +143,7 @@ func TestBaqueroDecompositionTrace(t *testing.T) {
 	C.Merge(A)
 
 	assertHasElem(t, C, "x", "step 7: C should have x")
-	assertContext(t, C, map[string]uint64{"A": 1, "B": 2}, "step 7: C.context")
+	assertContext(t, C, map[dotcontext.ReplicaID]uint64{"A": 1, "B": 2}, "step 7: C.context")
 
 	// ── Step 8: B merges A's remove delta from step 4 ──────────────
 	//
@@ -213,7 +213,7 @@ func assertDots[E comparable](t *testing.T, s *AWSet[E], elem E, want []dotconte
 }
 
 // assertContext checks the version vector portion of the causal context.
-func assertContext[E comparable](t *testing.T, s *AWSet[E], wantVV map[string]uint64, msg string) {
+func assertContext[E comparable](t *testing.T, s *AWSet[E], wantVV map[dotcontext.ReplicaID]uint64, msg string) {
 	t.Helper()
 	ctx := s.state.Context
 	for id, wantSeq := range wantVV {

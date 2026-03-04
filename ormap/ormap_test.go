@@ -13,13 +13,13 @@ func joinDotSet(a, b dotcontext.Causal[*dotcontext.DotSet]) dotcontext.Causal[*d
 	return dotcontext.JoinDotSet(a, b)
 }
 
-func newSetMap(id string) *ORMap[string, *dotcontext.DotSet] {
+func newSetMap(id dotcontext.ReplicaID) *ORMap[string, *dotcontext.DotSet] {
 	return New[string, *dotcontext.DotSet](id, joinDotSet, dotcontext.NewDotSet)
 }
 
 // addDot is a common Apply fn: generate a dot and add it to both
 // the local value and the delta.
-func addDot(id string, ctx *dotcontext.CausalContext, v *dotcontext.DotSet, delta *dotcontext.DotSet) {
+func addDot(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotSet, delta *dotcontext.DotSet) {
 	d := ctx.Next(id)
 	v.Add(d)
 	delta.Add(d)
@@ -311,7 +311,7 @@ func TestApplySupersede(t *testing.T) {
 	b.Merge(d1)
 
 	// a supersedes the old dot with a new one.
-	d2 := a.Apply("x", func(id string, ctx *dotcontext.CausalContext, v *dotcontext.DotSet, delta *dotcontext.DotSet) {
+	d2 := a.Apply("x", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotSet, delta *dotcontext.DotSet) {
 		// Remove old dots from v (Apply captures this in delta context).
 		var old []dotcontext.Dot
 		v.Range(func(d dotcontext.Dot) bool {
@@ -353,7 +353,7 @@ func joinDotFun(a, b dotcontext.Causal[*dotcontext.DotFun[counterValue]]) dotcon
 	return dotcontext.JoinDotFun(a, b)
 }
 
-func newCounterMap(id string) *ORMap[string, *dotcontext.DotFun[counterValue]] {
+func newCounterMap(id dotcontext.ReplicaID) *ORMap[string, *dotcontext.DotFun[counterValue]] {
 	return New[string, *dotcontext.DotFun[counterValue]](
 		id,
 		joinDotFun,
@@ -366,7 +366,7 @@ func TestDotFunValues(t *testing.T) {
 	b := newCounterMap("b")
 
 	// a sets counter at "hits" to 5.
-	da := a.Apply("hits", func(id string, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
+	da := a.Apply("hits", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
 		d := ctx.Next(id)
 		v.Set(d, counterValue{n: 5})
 		delta.Set(d, counterValue{n: 5})
@@ -375,7 +375,7 @@ func TestDotFunValues(t *testing.T) {
 
 	// b sets counter at "hits" to 3 (concurrent).
 	// Since b already has a's dot, this is an add, not a replace.
-	db := b.Apply("hits", func(id string, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
+	db := b.Apply("hits", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
 		d := ctx.Next(id)
 		v.Set(d, counterValue{n: 3})
 		delta.Set(d, counterValue{n: 3})

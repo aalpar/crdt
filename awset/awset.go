@@ -10,12 +10,12 @@ import (
 // Internally it is a DotMap[E, *DotSet] paired with a causal context.
 // Each element maps to the set of dots that witness its addition.
 type AWSet[E comparable] struct {
-	id    string
+	id    dotcontext.ReplicaID
 	state dotcontext.Causal[*dotcontext.DotMap[E, *dotcontext.DotSet]]
 }
 
 // New creates an empty AWSet for the given replica.
-func New[E comparable](replicaID string) *AWSet[E] {
+func New[E comparable](replicaID dotcontext.ReplicaID) *AWSet[E] {
 	return &AWSet[E]{
 		id: replicaID,
 		state: dotcontext.Causal[*dotcontext.DotMap[E, *dotcontext.DotSet]]{

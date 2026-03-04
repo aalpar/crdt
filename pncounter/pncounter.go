@@ -20,12 +20,12 @@ func (c counterValue) Join(other counterValue) counterValue {
 // accumulated contribution as a single dot in a DotFun. The global
 // value is the sum of all entries.
 type Counter struct {
-	id    string
+	id    dotcontext.ReplicaID
 	state dotcontext.Causal[*dotcontext.DotFun[counterValue]]
 }
 
 // New creates a counter at zero for the given replica.
-func New(replicaID string) *Counter {
+func New(replicaID dotcontext.ReplicaID) *Counter {
 	return &Counter{
 		id: replicaID,
 		state: dotcontext.Causal[*dotcontext.DotFun[counterValue]]{

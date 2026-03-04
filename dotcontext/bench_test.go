@@ -84,7 +84,7 @@ func BenchmarkContextMerge(b *testing.B) {
 			a := New()
 			bb := New()
 			for i := range n {
-				id := fmt.Sprintf("r%d", i)
+				id := ReplicaID(fmt.Sprintf("r%d", i))
 				a.Add(Dot{ID: id, Seq: 1})
 				bb.Add(Dot{ID: id, Seq: 2})
 			}
@@ -104,7 +104,7 @@ func makeCausalDotSet(nReplicas, dotsPerReplica int) Causal[*DotSet] {
 	ds := NewDotSet()
 	ctx := New()
 	for r := range nReplicas {
-		id := fmt.Sprintf("r%d", r)
+		id := ReplicaID(fmt.Sprintf("r%d", r))
 		for s := range dotsPerReplica {
 			d := Dot{ID: id, Seq: uint64(s + 1)}
 			ds.Add(d)
@@ -149,7 +149,7 @@ func BenchmarkJoinDotSet(b *testing.B) {
 func BenchmarkJoinDotFun(b *testing.B) {
 	for _, size := range []int{10, 100, 1000} {
 		b.Run(fmt.Sprintf("dots/%d", size), func(b *testing.B) {
-			makeDF := func(id string) Causal[*DotFun[maxVal]] {
+			makeDF := func(id ReplicaID) Causal[*DotFun[maxVal]] {
 				df := NewDotFun[maxVal]()
 				ctx := New()
 				for s := range size {
@@ -178,7 +178,7 @@ func BenchmarkJoinDotMap(b *testing.B) {
 	}
 	for _, nKeys := range []int{10, 100, 1000} {
 		b.Run(fmt.Sprintf("keys/%d", nKeys), func(b *testing.B) {
-			makeDM := func(id string) Causal[*DotMap[string, *DotSet]] {
+			makeDM := func(id ReplicaID) Causal[*DotMap[string, *DotSet]] {
 				dm := NewDotMap[string, *DotSet]()
 				ctx := New()
 				for k := range nKeys {
