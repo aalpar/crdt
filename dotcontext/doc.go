@@ -13,9 +13,11 @@
 //	Causal[T DotStore]           dot store + causal context
 //
 // Join functions merge two Causal values, implementing the
-// semilattice algebra (idempotent, commutative, associative):
+// semilattice algebra (idempotent, commutative, associative).
+// In the formulas below, sᵢ is the dot store of replica i and
+// cᵢ is its causal context (the set of dots it has observed):
 //
-//	JoinDotSet    — set formula: (s₁ ∩ s₂) ∪ (s₁ \ c₂) ∪ (s₂ \ c₁)
+//	JoinDotSet   — (s₁ ∩ s₂) ∪ (s₁ \ c₂) ∪ (s₂ \ c₁)
 //	JoinDotFun   — lattice join per dot
 //	JoinDotMap   — recursive join with caller-supplied nested join
 package dotcontext
