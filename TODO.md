@@ -20,4 +20,4 @@
 - [ ] CLAUDE.md for the crdt project
 - [x] CI (GitHub Actions: build, test, vet, fmt-check, race)
 - [x] Fuzz targets for join functions (found + fixed 2 bugs)
-- [ ] Benchmarks for CausalContext operations at scale
+- [x] Benchmarks for CausalContext operations at scale
