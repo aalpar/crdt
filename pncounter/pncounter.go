@@ -12,8 +12,8 @@ type counterValue struct {
 	n int64
 }
 
-func (c counterValue) Join(other counterValue) counterValue {
-	return c
+func (p counterValue) Join(other counterValue) counterValue {
+	return p
 }
 
 // Counter is a positive-negative counter. Each replica tracks its
@@ -26,25 +26,26 @@ type Counter struct {
 
 // New creates a counter at zero for the given replica.
 func New(replicaID dotcontext.ReplicaID) *Counter {
-	return &Counter{
+	q := &Counter{
 		id: replicaID,
 		state: dotcontext.Causal[*dotcontext.DotFun[counterValue]]{
 			Store:   dotcontext.NewDotFun[counterValue](),
 			Context: dotcontext.New(),
 		},
 	}
+	return q
 }
 
 // Increment adds n to the counter and returns a delta for replication.
 // Use a negative n to decrement.
-func (c *Counter) Increment(n int64) *Counter {
+func (p *Counter) Increment(n int64) *Counter {
 	// Find this replica's current dot and value.
 	var oldDot dotcontext.Dot
 	var oldValue int64
 	hasOld := false
 
-	c.state.Store.Range(func(d dotcontext.Dot, v counterValue) bool {
-		if d.ID == c.id {
+	p.state.Store.Range(func(d dotcontext.Dot, v counterValue) bool {
+		if d.ID == p.id {
 			oldDot = d
 			oldValue = v.n
 			hasOld = true
@@ -54,12 +55,12 @@ func (c *Counter) Increment(n int64) *Counter {
 	})
 
 	// Generate new dot and update local state.
-	d := c.state.Context.Next(c.id)
+	d := p.state.Context.Next(p.id)
 	if hasOld {
-		c.state.Store.Remove(oldDot)
+		p.state.Store.Remove(oldDot)
 	}
 	newVal := counterValue{n: oldValue + n}
-	c.state.Store.Set(d, newVal)
+	p.state.Store.Set(d, newVal)
 
 	// Build delta: new entry + context covering old dot.
 	deltaStore := dotcontext.NewDotFun[counterValue]()
@@ -80,14 +81,14 @@ func (c *Counter) Increment(n int64) *Counter {
 }
 
 // Decrement subtracts n from the counter and returns a delta.
-func (c *Counter) Decrement(n int64) *Counter {
-	return c.Increment(-n)
+func (p *Counter) Decrement(n int64) *Counter {
+	return p.Increment(-n)
 }
 
 // Value returns the current counter total (sum of all replica contributions).
-func (c *Counter) Value() int64 {
+func (p *Counter) Value() int64 {
 	var total int64
-	c.state.Store.Range(func(_ dotcontext.Dot, v counterValue) bool {
+	p.state.Store.Range(func(_ dotcontext.Dot, v counterValue) bool {
 		total += v.n
 		return true
 	})
@@ -95,6 +96,6 @@ func (c *Counter) Value() int64 {
 }
 
 // Merge incorporates a delta or full state from another counter.
-func (c *Counter) Merge(other *Counter) {
-	c.state = dotcontext.JoinDotFun(c.state, other.state)
+func (p *Counter) Merge(other *Counter) {
+	p.state = dotcontext.JoinDotFun(p.state, other.state)
 }

@@ -16,19 +16,20 @@ type EWFlag struct {
 
 // New creates a disabled EWFlag for the given replica.
 func New(replicaID dotcontext.ReplicaID) *EWFlag {
-	return &EWFlag{
+	q := &EWFlag{
 		id: replicaID,
 		state: dotcontext.Causal[*dotcontext.DotSet]{
 			Store:   dotcontext.NewDotSet(),
 			Context: dotcontext.New(),
 		},
 	}
+	return q
 }
 
 // Enable sets the flag to true and returns a delta for replication.
-func (f *EWFlag) Enable() *EWFlag {
-	d := f.state.Context.Next(f.id)
-	f.state.Store.Add(d)
+func (p *EWFlag) Enable() *EWFlag {
+	d := p.state.Context.Next(p.id)
+	p.state.Store.Add(d)
 
 	deltaStore := dotcontext.NewDotSet()
 	deltaStore.Add(d)
@@ -45,15 +46,15 @@ func (f *EWFlag) Enable() *EWFlag {
 }
 
 // Disable sets the flag to false and returns a delta for replication.
-func (f *EWFlag) Disable() *EWFlag {
+func (p *EWFlag) Disable() *EWFlag {
 	deltaCtx := dotcontext.New()
 
-	f.state.Store.Range(func(d dotcontext.Dot) bool {
+	p.state.Store.Range(func(d dotcontext.Dot) bool {
 		deltaCtx.Add(d)
 		return true
 	})
 
-	f.state.Store = dotcontext.NewDotSet()
+	p.state.Store = dotcontext.NewDotSet()
 
 	return &EWFlag{
 		state: dotcontext.Causal[*dotcontext.DotSet]{
@@ -64,11 +65,11 @@ func (f *EWFlag) Disable() *EWFlag {
 }
 
 // Value reports whether the flag is enabled.
-func (f *EWFlag) Value() bool {
-	return f.state.Store.Len() > 0
+func (p *EWFlag) Value() bool {
+	return p.state.Store.Len() > 0
 }
 
 // Merge incorporates a delta or full state from another EWFlag.
-func (f *EWFlag) Merge(other *EWFlag) {
-	f.state = dotcontext.JoinDotSet(f.state, other.state)
+func (p *EWFlag) Merge(other *EWFlag) {
+	p.state = dotcontext.JoinDotSet(p.state, other.state)
 }

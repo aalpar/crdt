@@ -16,13 +16,14 @@ type AWSet[E comparable] struct {
 
 // New creates an empty AWSet for the given replica.
 func New[E comparable](replicaID dotcontext.ReplicaID) *AWSet[E] {
-	return &AWSet[E]{
+	q := &AWSet[E]{
 		id: replicaID,
 		state: dotcontext.Causal[*dotcontext.DotMap[E, *dotcontext.DotSet]]{
 			Store:   dotcontext.NewDotMap[E, *dotcontext.DotSet](),
 			Context: dotcontext.New(),
 		},
 	}
+	return q
 }
 
 // Add inserts elem into the set and returns a delta for replication.
@@ -31,14 +32,14 @@ func New[E comparable](replicaID dotcontext.ReplicaID) *AWSet[E] {
 // We do not self-merge the delta because Next() already advances the
 // causal context — merging back would see the dot in both contexts
 // but not in the store, incorrectly treating it as removed.
-func (s *AWSet[E]) Add(elem E) *AWSet[E] {
-	d := s.state.Context.Next(s.id)
+func (p *AWSet[E]) Add(elem E) *AWSet[E] {
+	d := p.state.Context.Next(p.id)
 
 	// Update local store: add the new dot to this element's dot set.
-	ds, ok := s.state.Store.Get(elem)
+	ds, ok := p.state.Store.Get(elem)
 	if !ok {
 		ds = dotcontext.NewDotSet()
-		s.state.Store.Set(elem, ds)
+		p.state.Store.Set(elem, ds)
 	}
 	ds.Add(d)
 
@@ -65,17 +66,17 @@ func (s *AWSet[E]) Add(elem E) *AWSet[E] {
 // currently associated with elem. When merged with a concurrent add
 // (which introduces a new, unobserved dot), the add's dot survives —
 // hence "add-wins."
-func (s *AWSet[E]) Remove(elem E) *AWSet[E] {
+func (p *AWSet[E]) Remove(elem E) *AWSet[E] {
 	deltaCtx := dotcontext.New()
 
-	if ds, ok := s.state.Store.Get(elem); ok {
+	if ds, ok := p.state.Store.Get(elem); ok {
 		// Record all current dots in the delta's context.
 		ds.Range(func(d dotcontext.Dot) bool {
 			deltaCtx.Add(d)
 			return true
 		})
 		// Remove from local state.
-		s.state.Store.Delete(elem)
+		p.state.Store.Delete(elem)
 	}
 
 	return &AWSet[E]{
@@ -87,25 +88,25 @@ func (s *AWSet[E]) Remove(elem E) *AWSet[E] {
 }
 
 // Has reports whether elem is in the set.
-func (s *AWSet[E]) Has(elem E) bool {
-	_, ok := s.state.Store.Get(elem)
+func (p *AWSet[E]) Has(elem E) bool {
+	_, ok := p.state.Store.Get(elem)
 	return ok
 }
 
 // Elements returns all elements currently in the set.
 // The order is non-deterministic.
-func (s *AWSet[E]) Elements() []E {
-	return s.state.Store.Keys()
+func (p *AWSet[E]) Elements() []E {
+	return p.state.Store.Keys()
 }
 
 // Len returns the number of elements in the set.
-func (s *AWSet[E]) Len() int {
-	return s.state.Store.Len()
+func (p *AWSet[E]) Len() int {
+	return p.state.Store.Len()
 }
 
 // Merge incorporates a delta or full state from another AWSet.
-func (s *AWSet[E]) Merge(other *AWSet[E]) {
-	s.state = dotcontext.JoinDotMap(s.state, other.state, joinDotSet, dotcontext.NewDotSet)
+func (p *AWSet[E]) Merge(other *AWSet[E]) {
+	p.state = dotcontext.JoinDotMap(p.state, other.state, joinDotSet, dotcontext.NewDotSet)
 }
 
 // joinDotSet adapts JoinDotSet to the signature required by JoinDotMap.

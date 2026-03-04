@@ -13,6 +13,6 @@ type Dot struct {
 }
 
 // String returns "id:seq".
-func (d Dot) String() string {
-	return fmt.Sprintf("%s:%d", d.ID, d.Seq)
+func (p Dot) String() string {
+	return fmt.Sprintf("%s:%d", p.ID, p.Seq)
 }

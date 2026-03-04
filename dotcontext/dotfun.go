@@ -14,33 +14,34 @@ type DotFun[V Lattice[V]] struct {
 
 // NewDotFun returns an empty DotFun.
 func NewDotFun[V Lattice[V]]() *DotFun[V] {
-	return &DotFun[V]{entries: make(map[Dot]V)}
+	q := &DotFun[V]{entries: make(map[Dot]V)}
+	return q
 }
 
 // Set associates a value with a dot.
-func (f *DotFun[V]) Set(d Dot, v V) {
-	f.entries[d] = v
+func (p *DotFun[V]) Set(d Dot, v V) {
+	p.entries[d] = v
 }
 
 // Get returns the value for a dot and whether it exists.
-func (f *DotFun[V]) Get(d Dot) (V, bool) {
-	v, ok := f.entries[d]
+func (p *DotFun[V]) Get(d Dot) (V, bool) {
+	v, ok := p.entries[d]
 	return v, ok
 }
 
 // Remove deletes the mapping for a dot.
-func (f *DotFun[V]) Remove(d Dot) {
-	delete(f.entries, d)
+func (p *DotFun[V]) Remove(d Dot) {
+	delete(p.entries, d)
 }
 
 // Len returns the number of entries.
-func (f *DotFun[V]) Len() int {
-	return len(f.entries)
+func (p *DotFun[V]) Len() int {
+	return len(p.entries)
 }
 
 // Range calls fn for each dot-value pair. If fn returns false, iteration stops.
-func (f *DotFun[V]) Range(fn func(Dot, V) bool) {
-	for d, v := range f.entries {
+func (p *DotFun[V]) Range(fn func(Dot, V) bool) {
+	for d, v := range p.entries {
 		if !fn(d, v) {
 			return
 		}
@@ -48,18 +49,18 @@ func (f *DotFun[V]) Range(fn func(Dot, V) bool) {
 }
 
 // Dots returns the set of dots in this DotFun (DotStore implementation).
-func (f *DotFun[V]) Dots() *DotSet {
+func (p *DotFun[V]) Dots() *DotSet {
 	ds := NewDotSet()
-	for d := range f.entries {
+	for d := range p.entries {
 		ds.Add(d)
 	}
 	return ds
 }
 
 // Clone returns a deep copy.
-func (f *DotFun[V]) Clone() *DotFun[V] {
-	nf := &DotFun[V]{entries: make(map[Dot]V, len(f.entries))}
-	for d, v := range f.entries {
+func (p *DotFun[V]) Clone() *DotFun[V] {
+	nf := &DotFun[V]{entries: make(map[Dot]V, len(p.entries))}
+	for d, v := range p.entries {
 		nf.entries[d] = v
 	}
 	return nf
