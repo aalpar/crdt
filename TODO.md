@@ -1,16 +1,12 @@
 # TODO
 
-## dotcontext — core algebra (blocking)
+## dotcontext — core algebra
 
-- [ ] Implement `CausalContext.Compact()` — `dotcontext/context.go:73`
-      Promote contiguous outliers into version vector. Loop until stable.
-      Without this, `Next()` generates colliding dots.
+- [x] Implement `CausalContext.Compact()` — fixed-point outlier promotion
+- [x] Implement `JoinDotSet()` — three-term set formula
+- [x] `JoinDotFun`, `JoinDotMap` — lattice join, recursive join with callback
 
-- [ ] Implement `JoinDotSet()` — `dotcontext/join.go:12`
-      Three-term set formula: `(s₁ ∩ s₂) ∪ (s₁ \ c₂) ∪ (s₂ \ c₁)`
-      All other join functions depend on this.
-
-7 tests currently failing; all are downstream of these two functions.
+31 tests passing (includes semilattice property checks).
 
 ## Higher-level CRDTs (composes dotcontext)
 
