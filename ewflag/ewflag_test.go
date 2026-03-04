@@ -60,12 +60,29 @@ func TestDisableWhenAlreadyDisabled(t *testing.T) {
 
 // --- Enable-wins semantics ---
 
-// Two replicas start with the flag enabled (both have seen the same dot).
-// Concurrently, one disables and the other enables.
-// After exchanging deltas, both should converge to enabled.
-//
-// Hint: follow the pattern in awset TestAddWinsConcurrent.
-// Set up two replicas, sync them, then do concurrent ops and cross-merge.
+func TestEnableWinsConcurrent(t *testing.T) {
+	// Two replicas start with the flag enabled (both have seen the same dot).
+	a := New("a")
+	enableDelta := a.Enable()
+	b := New("b")
+	b.Merge(enableDelta) // both see the same dot for "enabled"
+
+	// Concurrent: a disables, b enables.
+	disableDelta := a.Disable()
+	reEnableDelta := b.Enable()
+
+	// Exchange deltas.
+	a.Merge(reEnableDelta)
+	b.Merge(disableDelta)
+
+	// Both should converge to enabled — enable wins over concurrent disable.
+	if !a.Value() {
+		t.Fatal("a: enable-wins failed, flag disabled")
+	}
+	if !b.Value() {
+		t.Fatal("b: enable-wins failed, flag disabled")
+	}
+}
 
 func TestConcurrentEnables(t *testing.T) {
 	a := New("a")

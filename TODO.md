@@ -21,7 +21,7 @@
 
 - [ ] `mvregister` — multi-value register (concurrent writes preserved, not LWW)
 - [ ] `gcounter` — grow-only counter (simpler than PN, useful as building block)
-- [ ] `ewflag` — enable-wins flag (`DotSet` — simplest possible CRDT)
+- [x] `ewflag` — enable-wins flag (`DotSet` — simplest possible CRDT)
 - [ ] `dwflag` — disable-wins flag (complement of ewflag)
 - [ ] `rwset` — remove-wins observed-remove set (dual of AWSet)
 
