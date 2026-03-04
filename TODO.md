@@ -18,6 +18,6 @@
 ## Infrastructure
 
 - [ ] CLAUDE.md for the crdt project
-- [ ] CI (GitHub Actions: build, test, vet)
+- [x] CI (GitHub Actions: build, test, vet, fmt-check, race)
 - [ ] Fuzz targets for join functions
 - [ ] Benchmarks for CausalContext operations at scale
