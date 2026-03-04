@@ -6,7 +6,6 @@ package dotcontext
 //
 // A dot survives if both sides have it (intersection), or one side has it
 // and the other's causal context hasn't observed it (difference).
-//
 func JoinDotSet(a, b Causal[*DotSet]) Causal[*DotSet] {
 	result := NewDotSet()
 
