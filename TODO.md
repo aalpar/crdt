@@ -26,3 +26,8 @@
 
 - [ ] `Compact()` is O(n²) — fixed-point loop iterates all outliers per pass, needs up to n passes. Sorted-insert approach could bring to O(n log n). (10→1.3µs, 100→57µs, 1000→5ms)
 - [ ] `JoinDotMap` at 1000 keys allocates 16K objects — each key clones DotSets for the join formula
+
+## New CRDT types
+
+- [ ] `mvregister` — multi-value register (concurrent writes preserved, not LWW)
+- [ ] `gcounter` — grow-only counter (simpler than PN, useful as building block)
