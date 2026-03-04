@@ -1,6 +1,7 @@
 GO       ?= go
 GOFLAGS  ?=
 PACKAGES  = ./...
+VERSION  := $(shell cat VERSION 2>/dev/null || echo v0.0.0)
 
 .PHONY: all
 all: build test vet
@@ -50,9 +51,22 @@ fmt-check:
 clean:
 	$(GO) clean $(PACKAGES)
 
-.PHONY: release
-release:
-	@test -n "$(VERSION)" || (echo "usage: make release VERSION=v0.1.0" && exit 1)
-	@echo $(VERSION) > VERSION
+.PHONY: tag
+tag:
 	git tag -a $(VERSION) -m "Release $(VERSION)"
 	@echo "Tagged $(VERSION). Push with: git push origin $(VERSION)"
+
+.PHONY: bump-major
+bump-major:
+	@echo $(VERSION) | sed -E 's/v([0-9]+)\..*/v'$$(echo $(VERSION) | sed -E 's/v([0-9]+)\..*/\1/' | awk '{print $$1+1}')'.0.0/' > VERSION
+	@echo "$(VERSION) → $$(cat VERSION)"
+
+.PHONY: bump-minor
+bump-minor:
+	@echo $(VERSION) | sed -E 's/v([0-9]+)\.([0-9]+)\..*/v\1.'$$(echo $(VERSION) | sed -E 's/v[0-9]+\.([0-9]+)\..*/\1/' | awk '{print $$1+1}')'.0/' > VERSION
+	@echo "$(VERSION) → $$(cat VERSION)"
+
+.PHONY: bump-patch
+bump-patch:
+	@echo $(VERSION) | sed -E 's/v([0-9]+)\.([0-9]+)\.([0-9]+).*/v\1.\2.'$$(echo $(VERSION) | sed -E 's/v[0-9]+\.[0-9]+\.([0-9]+).*/\1/' | awk '{print $$1+1}')'/' > VERSION
+	@echo "$(VERSION) → $$(cat VERSION)"
