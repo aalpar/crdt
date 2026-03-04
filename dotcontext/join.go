@@ -72,6 +72,7 @@ func JoinDotFun[V Lattice[V]](a, b Causal[*DotFun[V]]) Causal[*DotFun[V]] {
 func JoinDotMap[K comparable, V DotStore](
 	a, b Causal[*DotMap[K, V]],
 	joinV func(Causal[V], Causal[V]) Causal[V],
+	emptyV func() V,
 ) Causal[*DotMap[K, V]] {
 	result := NewDotMap[K, V]()
 
@@ -88,7 +89,7 @@ func JoinDotMap[K comparable, V DotStore](
 			// Key only in a: join with empty (b's context still applies).
 			joined := joinV(
 				Causal[V]{Store: va, Context: a.Context},
-				Causal[V]{Store: emptyOf(va), Context: b.Context},
+				Causal[V]{Store: emptyV(), Context: b.Context},
 			)
 			// Only keep if the result has dots (not fully subsumed).
 			if joined.Store.Dots().Len() > 0 {
@@ -104,7 +105,7 @@ func JoinDotMap[K comparable, V DotStore](
 			return true // already handled above
 		}
 		joined := joinV(
-			Causal[V]{Store: emptyOf(vb), Context: a.Context},
+			Causal[V]{Store: emptyV(), Context: a.Context},
 			Causal[V]{Store: vb, Context: b.Context},
 		)
 		if joined.Store.Dots().Len() > 0 {
@@ -118,19 +119,4 @@ func JoinDotMap[K comparable, V DotStore](
 	ctx.Compact()
 
 	return Causal[*DotMap[K, V]]{Store: result, Context: ctx}
-}
-
-// emptyOf returns an empty DotStore of the same concrete type.
-// This uses a type switch over the known DotStore implementations.
-func emptyOf[V DotStore](v V) V {
-	switch any(v).(type) {
-	case *DotSet:
-		return any(NewDotSet()).(V)
-	default:
-		// For unknown types, return the zero value.
-		// This is a limitation — new DotStore implementations
-		// must be added here or provide their own empty constructor.
-		var zero V
-		return zero
-	}
 }

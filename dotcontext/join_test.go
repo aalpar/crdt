@@ -160,7 +160,7 @@ func TestJoinDotMapSharedKey(t *testing.T) {
 	joinDS := func(x, y Causal[*DotSet]) Causal[*DotSet] {
 		return JoinDotSet(x, y)
 	}
-	result := JoinDotMap(a, b, joinDS)
+	result := JoinDotMap(a, b, joinDS, NewDotSet)
 
 	v, ok := result.Store.Get("key")
 	if !ok {
@@ -192,7 +192,7 @@ func TestJoinDotMapKeyOnlyOneSide(t *testing.T) {
 	joinDS := func(x, y Causal[*DotSet]) Causal[*DotSet] {
 		return JoinDotSet(x, y)
 	}
-	result := JoinDotMap(a, b, joinDS)
+	result := JoinDotMap(a, b, joinDS, NewDotSet)
 
 	v, ok := result.Store.Get("key")
 	if !ok {

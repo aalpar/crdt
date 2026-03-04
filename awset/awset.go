@@ -105,7 +105,7 @@ func (s *AWSet[E]) Len() int {
 
 // Merge incorporates a delta or full state from another AWSet.
 func (s *AWSet[E]) Merge(other *AWSet[E]) {
-	s.state = dotcontext.JoinDotMap(s.state, other.state, joinDotSet)
+	s.state = dotcontext.JoinDotMap(s.state, other.state, joinDotSet, dotcontext.NewDotSet)
 }
 
 // joinDotSet adapts JoinDotSet to the signature required by JoinDotMap.
