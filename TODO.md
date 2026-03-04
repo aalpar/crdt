@@ -10,7 +10,7 @@
 
 ## Higher-level CRDTs (composes dotcontext)
 
-- [ ] `awset` — add-wins observed-remove set (`DotMap[K, *DotSet]`)
+- [x] `awset` — add-wins observed-remove set (`DotMap[K, *DotSet]`)
 - [ ] `lwwregister` — last-writer-wins register (`DotFun[TimestampedValue]`)
 - [ ] `pncounter` — positive-negative counter (`DotFun[CounterValue]`)
 - [ ] `ormap` — observed-remove map (`DotMap[K, V DotStore]`)
