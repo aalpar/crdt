@@ -90,6 +90,23 @@ func (c *CausalContext) Compact() {
 	}
 }
 
+// ReplicaIDs returns all replica IDs known to this context.
+// This includes replicas from both the version vector and outliers.
+func (c *CausalContext) ReplicaIDs() []string {
+	seen := make(map[string]struct{}, len(c.vv))
+	for id := range c.vv {
+		seen[id] = struct{}{}
+	}
+	for d := range c.outliers {
+		seen[d.ID] = struct{}{}
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // Clone returns a deep copy.
 func (c *CausalContext) Clone() *CausalContext {
 	cc := &CausalContext{

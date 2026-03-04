@@ -137,6 +137,11 @@ func (m *ORMap[K, V]) Len() int {
 	return m.state.Store.Len()
 }
 
+// Context returns the ORMap's causal context.
+func (m *ORMap[K, V]) Context() *dotcontext.CausalContext {
+	return m.state.Context
+}
+
 // Merge incorporates a delta or full state from another ORMap.
 func (m *ORMap[K, V]) Merge(other *ORMap[K, V]) {
 	m.state = dotcontext.JoinDotMap(m.state, other.state, m.joinV, m.emptyV)
