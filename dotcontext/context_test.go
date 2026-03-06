@@ -333,6 +333,46 @@ func TestCausalContextMissingRemoteOutlierAlreadyObserved(t *testing.T) {
 	}
 }
 
+func TestCausalContextMissingMixed(t *testing.T) {
+	// local:  VV{a:3, b:2}, outliers{a:6}
+	// remote: VV{a:5, b:4, c:1}, outliers{a:8}
+	//
+	// Replica a: VV range {4,5}, hole-punch a:6 → stays {4,5} (6 > 5, outside range).
+	//            Remote outlier a:8: !local.Has(a:8) → {8,8}.
+	//            Result: {4,5}, {8,8}.
+	// Replica b: VV range {3,4}. No local outliers for b.
+	//            Result: {3,4}.
+	// Replica c: VV range {1,1}. New replica.
+	//            Result: {1,1}.
+	local := New()
+	local.Add(Dot{ID: "a", Seq: 1})
+	local.Add(Dot{ID: "a", Seq: 2})
+	local.Add(Dot{ID: "a", Seq: 3})
+	local.Add(Dot{ID: "a", Seq: 6}) // outlier (gap at 4,5)
+	local.Add(Dot{ID: "b", Seq: 1})
+	local.Add(Dot{ID: "b", Seq: 2})
+
+	remote := New()
+	for i := 0; i < 5; i++ {
+		remote.Next("a")
+	}
+	for i := 0; i < 4; i++ {
+		remote.Next("b")
+	}
+	remote.Next("c")
+	remote.Add(Dot{ID: "a", Seq: 8}) // outlier
+
+	got := local.Missing(remote)
+	want := map[ReplicaID][]SeqRange{
+		"a": {{Lo: 4, Hi: 5}, {Lo: 8, Hi: 8}},
+		"b": {{Lo: 3, Hi: 4}},
+		"c": {{Lo: 1, Hi: 1}},
+	}
+	if !missingEqual(got, want) {
+		t.Errorf("Missing() = %v, want %v", got, want)
+	}
+}
+
 func TestMergeRanges(t *testing.T) {
 	tcs := []struct {
 		name string
