@@ -18,3 +18,25 @@ func NewPeerTracker() *PeerTracker {
 func (t *PeerTracker) Len() int {
 	return len(t.peers)
 }
+
+// AddPeer registers a peer with its initial known state.
+// A nil context is treated as empty (peer knows nothing).
+// Adding an already-known peer is a no-op.
+func (t *PeerTracker) AddPeer(id dotcontext.ReplicaID, cc *dotcontext.CausalContext) {
+	if _, ok := t.peers[id]; ok {
+		return
+	}
+	if cc == nil {
+		cc = dotcontext.New()
+	}
+	t.peers[id] = cc
+}
+
+// Peers returns all registered peer IDs. Order is non-deterministic.
+func (t *PeerTracker) Peers() []dotcontext.ReplicaID {
+	ids := make([]dotcontext.ReplicaID, 0, len(t.peers))
+	for id := range t.peers {
+		ids = append(ids, id)
+	}
+	return ids
+}
