@@ -369,17 +369,64 @@ distributed across multiple servers using threshold operations:
 - k-of-n servers must participate to issue credentials
 - No single server's failure breaks the trust chain
 
+### The n-k Subsystem
+
+Distributed security requires a designated subset of nodes to participate in
+threshold operations. This subset — the n-k subsystem — is a tightly-coupled
+replication group with specific properties:
+
+**Full replication within the group.** Unlike the broader system where partial
+replication is the norm, n-k nodes fully replicate each other. Every node in
+the subsystem holds all data that the subsystem is responsible for. This serves
+both durability (k copies exist) and security (k nodes can participate in
+threshold operations over the data).
+
+**Structured replication traffic.** Between n-k peers, replication is
+predictable and optimizable:
+
+| Property           | n-k peer replication    | User-facing traffic      |
+|--------------------|-------------------------|--------------------------|
+| Peers              | Known, fixed set        | Unknown, any client      |
+| Operations         | Context diff → deltas   | Arbitrary reads/writes   |
+| Predictability     | O(1) per operation      | O(?)                     |
+| Scheduling         | Continuous, structured  | Bursty, unstructured     |
+
+n-k systems spend most of their bandwidth on peer replication. This is not a
+flaw — it is the primary function. Replication between known peers with known
+state is cheap and predictable. User requests are not.
+
+**Shield the subsystem from unstructured traffic.** Mixing structured
+replication with unstructured user requests degrades both. The n-k subsystem
+should be optimized for its primary function (replication and threshold
+operations). User-facing traffic should be served by nodes that sit in front
+of the n-k core and proxy requests as needed.
+
+This creates a concrete tier boundary forced by operational reality:
+
+- **n-k core**: fully replicated, optimized for peer replication and threshold
+  operations, limited user-facing load
+- **Edge nodes**: serve users, push writes to the core eagerly, pull content
+  from the core on demand
+
+This is not a client-server split imposed by design — it is forced by the
+requirement that security demands threshold coordination, and threshold
+coordination demands dedicated replication bandwidth.
+
 ### Shared Infrastructure
 
-The k-of-n server coordination required for trust operations is the same
-infrastructure that supports quorum-confirmed durability on the data plane.
-Both planes share the same set of coordinating servers and the same threshold
-property. This is not a coincidence — both problems (trust and durability)
-require the same thing: confirmation from multiple high-availability nodes.
+The k-of-n coordination required for trust operations, the full replication
+required for the n-k subsystem, and the quorum-confirmed durability on the
+data plane are all the same infrastructure. The n-k subsystem serves all three
+purposes simultaneously:
 
-Since security demands k-of-n coordination regardless, the incremental cost
-of data durability confirmation is low. The system pays the quorum tax once
-and uses it for both planes.
+- **Security**: threshold trust operations (credential issuance, revocation)
+- **Durability**: k acknowledged copies = confirmed durable
+- **Replication**: full internal replication keeps all n-k nodes in sync
+
+Since security demands this infrastructure regardless, the incremental cost
+of data durability confirmation is zero — it falls out of the replication
+that the n-k subsystem already performs. The system pays the threshold tax
+once and uses it for all three purposes.
 
 ### Two-Plane Independence
 
