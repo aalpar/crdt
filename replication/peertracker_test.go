@@ -169,3 +169,29 @@ func TestCanGCAfterRemovePeer(t *testing.T) {
 		t.Error("CanGC should be true after removing lagging peer")
 	}
 }
+
+func TestPendingUnknownPeer(t *testing.T) {
+	tr := NewPeerTracker()
+	local := dotcontext.New()
+	local.Next("a")
+
+	if got := tr.Pending("ghost", local); got != nil {
+		t.Errorf("Pending(unknown) = %v, want nil", got)
+	}
+}
+
+// TODO(aalpar): Write TestPendingComposesWithFetch.
+//
+// This test proves the two types (PeerTracker + DeltaStore) compose
+// without coupling. The pattern:
+//
+//   pending := tracker.Pending(peerID, localCC)
+//   deltas  := store.Fetch(pending)
+//
+// Set up: a local node with 3 dots (a:1, a:2, a:3) in both its
+// CausalContext and DeltaStore. A peer that has acknowledged a:1 only.
+// Pending should return a:2..3. Fetch with that should return
+// exactly the deltas for a:2 and a:3.
+//
+// This is the key design property — the composability of Pending's
+// output with DeltaStore.Fetch's input.
