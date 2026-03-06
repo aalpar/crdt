@@ -32,6 +32,15 @@ func (s *DeltaStore[T]) Remove(d Dot) {
 	delete(s.deltas, d)
 }
 
+// Dots returns a snapshot of all stored dots.
+func (s *DeltaStore[T]) Dots() []Dot {
+	dots := make([]Dot, 0, len(s.deltas))
+	for d := range s.deltas {
+		dots = append(dots, d)
+	}
+	return dots
+}
+
 // Fetch returns all stored deltas whose dots fall within the given ranges.
 // The input format matches Missing()'s return type for direct composability:
 //

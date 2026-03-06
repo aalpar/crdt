@@ -140,3 +140,36 @@ func TestDeltaStoreFetchNoMatches(t *testing.T) {
 		t.Errorf("Fetch with no matches = %v, want nil", got)
 	}
 }
+
+func TestDotsEmpty(t *testing.T) {
+	store := NewDeltaStore[int]()
+	dots := store.Dots()
+	if len(dots) != 0 {
+		t.Errorf("Dots() = %v, want empty", dots)
+	}
+}
+
+func TestDots(t *testing.T) {
+	store := NewDeltaStore[int]()
+	d1 := Dot{ID: "a", Seq: 1}
+	d2 := Dot{ID: "a", Seq: 2}
+	d3 := Dot{ID: "b", Seq: 1}
+	store.Add(d1, 10)
+	store.Add(d2, 20)
+	store.Add(d3, 30)
+
+	dots := store.Dots()
+	if len(dots) != 3 {
+		t.Fatalf("len(Dots()) = %d, want 3", len(dots))
+	}
+
+	have := make(map[Dot]bool)
+	for _, d := range dots {
+		have[d] = true
+	}
+	for _, want := range []Dot{d1, d2, d3} {
+		if !have[want] {
+			t.Errorf("Dots() missing %v", want)
+		}
+	}
+}
