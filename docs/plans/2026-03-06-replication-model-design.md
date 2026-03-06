@@ -60,6 +60,49 @@ given the physical constraints of the actual network.
 The algebra is the bottom layer — already built. The data plane is the strategy
 layer. The control plane secures it. The two planes do not block each other.
 
+## Partial Replication
+
+Full replication is impossible. The total data in the system exceeds the
+capacity of any single node. No node holds everything. This is not a design
+choice — it is a hard constraint of the problem space.
+
+Every node holds a subset of the total data. But the entire system is viewable:
+any piece of data is accessible, though not all data is local. This creates
+two kinds of reads:
+
+| Read type | Data location | Requires network? | Availability     |
+|-----------|---------------|-------------------|------------------|
+| Local     | On this node  | No                | Always available |
+| Remote    | On a peer     | Yes               | Requires connectivity |
+
+### Metadata vs. Content
+
+This constraint motivates a separation between metadata and content:
+
+- **Metadata** (causal contexts, version vectors) — small. Tracks *which events
+  exist* and their causal relationships. Can be fully replicated across all
+  nodes.
+
+- **Content** (dot store entries, actual values) — large. The data itself.
+  Partially replicated based on node capacity and interest.
+
+Every node knows what data exists in the system (metadata is fully replicated).
+Not every node has the data itself (content is partially replicated). A node
+can answer "do I have this?" instantly, and "where can I get it?" using peer
+knowledge.
+
+This separation means the CRDT algebra operates on two levels:
+
+- **Metadata merges** happen eagerly between all peers — keeping every node's
+  causal context up to date with the full system state.
+- **Content transfers** happen on demand or by interest — a node pulls content
+  it needs from peers that have it.
+
+The eager-push-upward rule applies to both: a client pushes its content to a
+server (durability), and metadata propagates everywhere (awareness). The
+lazy-pull-downward rule applies to content: a client pulls content it needs
+when it needs it.
+
 ## Nodes
 
 A node is any device that participates in the system. Nodes are not assigned
@@ -359,13 +402,14 @@ offers reduced guarantees until the infrastructure recovers.
 
 ## Open Questions
 
-- **Partial replication.** Does every node store every CRDT, or can nodes hold
-  subsets? Full replication is bounded by the smallest node's capacity. Partial
-  replication requires defining which subsets and adds routing complexity.
+- **Interest and eviction.** Which content does a node store locally? How does
+  it decide what to keep and what to evict when storage is full? Interest-based
+  subscription, LRU, or explicit pinning?
 
-- **Downward push.** When a server receives a delta from a client, does it push
-  to other clients proactively, or do clients pull on reconnect? Eager downward
-  push maximizes speed but may push data to nodes that don't need it.
+- **Content routing.** When a node needs content it doesn't have, how does it
+  find a peer that has it? Metadata says what exists, but not where it lives.
+  Options: query peers, maintain a location index, or use the metadata
+  propagation path as a hint.
 
 - **Peer prioritization.** When a node has multiple peers, which gets the delta
   first? Highest availability? Lowest latency? Round-robin?
