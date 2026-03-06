@@ -26,3 +26,8 @@ func (s *DeltaStore[T]) Get(d Dot) (T, bool) {
 	v, ok := s.deltas[d]
 	return v, ok
 }
+
+// Remove deletes a delta by its dot.
+func (s *DeltaStore[T]) Remove(d Dot) {
+	delete(s.deltas, d)
+}

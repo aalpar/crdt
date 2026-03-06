@@ -35,3 +35,25 @@ func TestDeltaStoreGetMissing(t *testing.T) {
 		t.Error("Get returned ok for absent dot")
 	}
 }
+
+func TestDeltaStoreRemove(t *testing.T) {
+	s := NewDeltaStore[string]()
+	d := Dot{ID: "a", Seq: 1}
+	s.Add(d, "delta-1")
+	s.Remove(d)
+
+	if s.Len() != 0 {
+		t.Errorf("Len() after Remove = %d, want 0", s.Len())
+	}
+	if _, ok := s.Get(d); ok {
+		t.Error("Get returned ok after Remove")
+	}
+}
+
+func TestDeltaStoreRemoveAbsent(t *testing.T) {
+	s := NewDeltaStore[string]()
+	s.Remove(Dot{ID: "x", Seq: 1}) // should not panic
+	if s.Len() != 0 {
+		t.Errorf("Len() = %d, want 0", s.Len())
+	}
+}
