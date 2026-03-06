@@ -31,3 +31,30 @@ func (s *DeltaStore[T]) Get(d Dot) (T, bool) {
 func (s *DeltaStore[T]) Remove(d Dot) {
 	delete(s.deltas, d)
 }
+
+// Fetch returns all stored deltas whose dots fall within the given ranges.
+// The input format matches Missing()'s return type for direct composability:
+//
+//	store.Fetch(local.Missing(remote))
+func (s *DeltaStore[T]) Fetch(missing map[ReplicaID][]SeqRange) map[Dot]T {
+	if len(missing) == 0 {
+		return nil
+	}
+	result := make(map[Dot]T)
+	for d, delta := range s.deltas {
+		ranges, ok := missing[d.ID]
+		if !ok {
+			continue
+		}
+		for _, r := range ranges {
+			if d.Seq >= r.Lo && d.Seq <= r.Hi {
+				result[d] = delta
+				break
+			}
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}

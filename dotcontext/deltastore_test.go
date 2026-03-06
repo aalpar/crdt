@@ -57,3 +57,27 @@ func TestDeltaStoreRemoveAbsent(t *testing.T) {
 		t.Errorf("Len() = %d, want 0", s.Len())
 	}
 }
+
+func TestDeltaStoreFetchSingleRange(t *testing.T) {
+	s := NewDeltaStore[string]()
+	s.Add(Dot{ID: "a", Seq: 1}, "d1")
+	s.Add(Dot{ID: "a", Seq: 2}, "d2")
+	s.Add(Dot{ID: "a", Seq: 3}, "d3")
+	s.Add(Dot{ID: "a", Seq: 5}, "d5") // gap at 4
+
+	missing := map[ReplicaID][]SeqRange{
+		"a": {{Lo: 2, Hi: 4}},
+	}
+	got := s.Fetch(missing)
+
+	// Should return a:2 and a:3. a:4 is not in store. a:1 and a:5 outside range.
+	if len(got) != 2 {
+		t.Fatalf("Fetch() returned %d deltas, want 2: %v", len(got), got)
+	}
+	if got[Dot{ID: "a", Seq: 2}] != "d2" {
+		t.Error("missing a:2")
+	}
+	if got[Dot{ID: "a", Seq: 3}] != "d3" {
+		t.Error("missing a:3")
+	}
+}
