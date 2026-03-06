@@ -181,3 +181,94 @@ func (DotSetCodec) Decode(r io.Reader) (*DotSet, error) {
 	}
 	return ds, nil
 }
+
+// DotFunCodec encodes a DotFun[V] as [uint64: len] ([Dot] [V])*
+type DotFunCodec[V Lattice[V]] struct {
+	ValueCodec Codec[V]
+}
+
+func (c DotFunCodec[V]) Encode(w io.Writer, df *DotFun[V]) error {
+	if err := (Uint64Codec{}).Encode(w, uint64(df.Len())); err != nil {
+		return err
+	}
+	dc := DotCodec{}
+	var encErr error
+	df.Range(func(d Dot, v V) bool {
+		if err := dc.Encode(w, d); err != nil {
+			encErr = err
+			return false
+		}
+		if err := c.ValueCodec.Encode(w, v); err != nil {
+			encErr = err
+			return false
+		}
+		return true
+	})
+	return encErr
+}
+
+func (c DotFunCodec[V]) Decode(r io.Reader) (*DotFun[V], error) {
+	n, err := (Uint64Codec{}).Decode(r)
+	if err != nil {
+		return nil, err
+	}
+	df := NewDotFun[V]()
+	dc := DotCodec{}
+	for i := uint64(0); i < n; i++ {
+		d, err := dc.Decode(r)
+		if err != nil {
+			return nil, err
+		}
+		v, err := c.ValueCodec.Decode(r)
+		if err != nil {
+			return nil, err
+		}
+		df.Set(d, v)
+	}
+	return df, nil
+}
+
+// DotMapCodec encodes a DotMap[K,V] as [uint64: len] ([K] [V])*
+type DotMapCodec[K comparable, V DotStore] struct {
+	KeyCodec   Codec[K]
+	ValueCodec Codec[V]
+}
+
+func (c DotMapCodec[K, V]) Encode(w io.Writer, dm *DotMap[K, V]) error {
+	if err := (Uint64Codec{}).Encode(w, uint64(dm.Len())); err != nil {
+		return err
+	}
+	var encErr error
+	dm.Range(func(k K, v V) bool {
+		if err := c.KeyCodec.Encode(w, k); err != nil {
+			encErr = err
+			return false
+		}
+		if err := c.ValueCodec.Encode(w, v); err != nil {
+			encErr = err
+			return false
+		}
+		return true
+	})
+	return encErr
+}
+
+func (c DotMapCodec[K, V]) Decode(r io.Reader) (*DotMap[K, V], error) {
+	n, err := (Uint64Codec{}).Decode(r)
+	if err != nil {
+		return nil, err
+	}
+	dm := NewDotMap[K, V]()
+	for i := uint64(0); i < n; i++ {
+		k, err := c.KeyCodec.Decode(r)
+		if err != nil {
+			return nil, err
+		}
+		v, err := c.ValueCodec.Decode(r)
+		if err != nil {
+			return nil, err
+		}
+		dm.Set(k, v)
+	}
+	return dm, nil
+}

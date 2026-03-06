@@ -2,6 +2,7 @@ package dotcontext
 
 import (
 	"bytes"
+	"io"
 	"testing"
 )
 
@@ -164,5 +165,121 @@ func TestDotSetCodecEmpty(t *testing.T) {
 	}
 	if got.Len() != 0 {
 		t.Error("empty DotSet should decode to empty")
+	}
+}
+
+type maxIntCodec struct{}
+
+func (maxIntCodec) Encode(w io.Writer, v maxInt) error {
+	return (Int64Codec{}).Encode(w, int64(v))
+}
+
+func (maxIntCodec) Decode(r io.Reader) (maxInt, error) {
+	n, err := (Int64Codec{}).Decode(r)
+	return maxInt(n), err
+}
+
+func TestDotFunCodecRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	c := DotFunCodec[maxInt]{ValueCodec: maxIntCodec{}}
+
+	df := NewDotFun[maxInt]()
+	df.Set(Dot{ID: "a", Seq: 1}, maxInt(10))
+	df.Set(Dot{ID: "b", Seq: 2}, maxInt(-5))
+
+	if err := c.Encode(&buf, df); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Len() != 2 {
+		t.Fatalf("got %d entries, want 2", got.Len())
+	}
+	v, ok := got.Get(Dot{ID: "a", Seq: 1})
+	if !ok || v != 10 {
+		t.Errorf("entry (a,1): got %v/%v, want 10/true", v, ok)
+	}
+	v, ok = got.Get(Dot{ID: "b", Seq: 2})
+	if !ok || v != -5 {
+		t.Errorf("entry (b,2): got %v/%v, want -5/true", v, ok)
+	}
+}
+
+func TestDotMapCodecRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	c := DotMapCodec[string, *DotSet]{
+		KeyCodec:   StringCodec{},
+		ValueCodec: DotSetCodec{},
+	}
+
+	dm := NewDotMap[string, *DotSet]()
+	ds1 := NewDotSet()
+	ds1.Add(Dot{ID: "a", Seq: 1})
+	dm.Set("key1", ds1)
+
+	ds2 := NewDotSet()
+	ds2.Add(Dot{ID: "b", Seq: 2})
+	ds2.Add(Dot{ID: "b", Seq: 3})
+	dm.Set("key2", ds2)
+
+	if err := c.Encode(&buf, dm); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Len() != 2 {
+		t.Fatalf("got %d keys, want 2", got.Len())
+	}
+	v1, ok := got.Get("key1")
+	if !ok || v1.Len() != 1 || !v1.Has(Dot{ID: "a", Seq: 1}) {
+		t.Error("key1 mismatch")
+	}
+	v2, ok := got.Get("key2")
+	if !ok || v2.Len() != 2 {
+		t.Error("key2 mismatch")
+	}
+}
+
+func TestDotMapCodecNested(t *testing.T) {
+	// Two-level nesting: DotMap[string, *DotMap[string, *DotSet]]
+	// This is the BlockRef structure.
+	var buf bytes.Buffer
+	inner := DotMapCodec[string, *DotSet]{
+		KeyCodec:   StringCodec{},
+		ValueCodec: DotSetCodec{},
+	}
+	c := DotMapCodec[string, *DotMap[string, *DotSet]]{
+		KeyCodec:   StringCodec{},
+		ValueCodec: &inner,
+	}
+
+	outer := NewDotMap[string, *DotMap[string, *DotSet]]()
+	innerMap := NewDotMap[string, *DotSet]()
+	ds := NewDotSet()
+	ds.Add(Dot{ID: "w1", Seq: 1})
+	innerMap.Set("file-a", ds)
+	outer.Set("hash-abc", innerMap)
+
+	if err := c.Encode(&buf, outer); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Len() != 1 {
+		t.Fatal("outer map should have 1 entry")
+	}
+	im, ok := got.Get("hash-abc")
+	if !ok {
+		t.Fatal("missing hash-abc")
+	}
+	ids, ok := im.Get("file-a")
+	if !ok || !ids.Has(Dot{ID: "w1", Seq: 1}) {
+		t.Error("inner dot missing")
 	}
 }
