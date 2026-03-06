@@ -15,3 +15,14 @@ func NewDeltaStore[T any]() *DeltaStore[T] {
 func (s *DeltaStore[T]) Len() int {
 	return len(s.deltas)
 }
+
+// Add stores a delta indexed by the dot that created it.
+func (s *DeltaStore[T]) Add(d Dot, delta T) {
+	s.deltas[d] = delta
+}
+
+// Get retrieves a single delta by its dot.
+func (s *DeltaStore[T]) Get(d Dot) (T, bool) {
+	v, ok := s.deltas[d]
+	return v, ok
+}
