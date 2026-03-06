@@ -180,18 +180,36 @@ func TestPendingUnknownPeer(t *testing.T) {
 	}
 }
 
-// TODO(aalpar): Write TestPendingComposesWithFetch.
-//
-// This test proves the two types (PeerTracker + DeltaStore) compose
-// without coupling. The pattern:
-//
-//   pending := tracker.Pending(peerID, localCC)
-//   deltas  := store.Fetch(pending)
-//
-// Set up: a local node with 3 dots (a:1, a:2, a:3) in both its
-// CausalContext and DeltaStore. A peer that has acknowledged a:1 only.
-// Pending should return a:2..3. Fetch with that should return
-// exactly the deltas for a:2 and a:3.
-//
-// This is the key design property — the composability of Pending's
-// output with DeltaStore.Fetch's input.
+func TestPendingComposesWithFetch(t *testing.T) {
+	// Local node has 3 dots in both its CausalContext and DeltaStore.
+	local := dotcontext.New()
+	d1 := local.Next("a") // a:1
+	d2 := local.Next("a") // a:2
+	d3 := local.Next("a") // a:3
+
+	store := dotcontext.NewDeltaStore[string]()
+	store.Add(d1, "delta1")
+	store.Add(d2, "delta2")
+	store.Add(d3, "delta3")
+
+	// Peer has acknowledged only a:1.
+	peerCC := dotcontext.New()
+	peerCC.Add(d1)
+
+	tracker := NewPeerTracker()
+	tracker.AddPeer("peer1", peerCC)
+
+	// Pending → Fetch: no adapter, no glue.
+	pending := tracker.Pending("peer1", local)
+	deltas := store.Fetch(pending)
+
+	if len(deltas) != 2 {
+		t.Fatalf("Fetch(Pending()) returned %d deltas, want 2", len(deltas))
+	}
+	if deltas[d2] != "delta2" {
+		t.Errorf("missing delta for %v", d2)
+	}
+	if deltas[d3] != "delta3" {
+		t.Errorf("missing delta for %v", d3)
+	}
+}
