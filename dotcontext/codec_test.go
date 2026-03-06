@@ -309,6 +309,42 @@ func TestCausalCodecDotSetRoundTrip(t *testing.T) {
 	}
 }
 
+func FuzzDecodeDotSet(f *testing.F) {
+	// Seed: a valid encoded empty DotSet
+	var buf bytes.Buffer
+	(DotSetCodec{}).Encode(&buf, NewDotSet())
+	f.Add(buf.Bytes())
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		r := bytes.NewReader(data)
+		// Must not panic. Errors are fine.
+		(DotSetCodec{}).Decode(r)
+	})
+}
+
+func FuzzDecodeCausalContext(f *testing.F) {
+	var buf bytes.Buffer
+	(CausalContextCodec{}).Encode(&buf, New())
+	f.Add(buf.Bytes())
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		r := bytes.NewReader(data)
+		(CausalContextCodec{}).Decode(r)
+	})
+}
+
+func FuzzDecodeCausalDotSet(f *testing.F) {
+	var buf bytes.Buffer
+	c := CausalCodec[*DotSet]{StoreCodec: DotSetCodec{}}
+	c.Encode(&buf, Causal[*DotSet]{Store: NewDotSet(), Context: New()})
+	f.Add(buf.Bytes())
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		r := bytes.NewReader(data)
+		c.Decode(r)
+	})
+}
+
 func TestCausalCodecNestedDotMapRoundTrip(t *testing.T) {
 	// Full BlockRef delta shape: Causal[*DotMap[string, *DotMap[string, *DotSet]]]
 	var buf bytes.Buffer

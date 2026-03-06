@@ -2,8 +2,14 @@ package dotcontext
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 )
+
+// maxDecodeLen caps the element count or byte length that any decoder will
+// allocate from a length prefix. This prevents OOM from malformed input
+// (e.g. a fuzzed uint64 that claims millions of entries).
+const maxDecodeLen = 1 << 20 // ~1 million
 
 // Codec encodes/decodes values of type T to/from a binary stream.
 type Codec[T any] interface {
@@ -26,6 +32,9 @@ func (StringCodec) Decode(r io.Reader) (string, error) {
 	var n uint64
 	if err := binary.Read(r, binary.LittleEndian, &n); err != nil {
 		return "", err
+	}
+	if n > maxDecodeLen {
+		return "", fmt.Errorf("string length %d exceeds max %d", n, maxDecodeLen)
 	}
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(r, buf); err != nil {
@@ -119,6 +128,9 @@ func (CausalContextCodec) Decode(r io.Reader) (*CausalContext, error) {
 	if err != nil {
 		return nil, err
 	}
+	if vvLen > maxDecodeLen {
+		return nil, fmt.Errorf("version vector length %d exceeds max %d", vvLen, maxDecodeLen)
+	}
 	for i := uint64(0); i < vvLen; i++ {
 		id, err := (StringCodec{}).Decode(r)
 		if err != nil {
@@ -134,6 +146,9 @@ func (CausalContextCodec) Decode(r io.Reader) (*CausalContext, error) {
 	outLen, err := (Uint64Codec{}).Decode(r)
 	if err != nil {
 		return nil, err
+	}
+	if outLen > maxDecodeLen {
+		return nil, fmt.Errorf("outlier count %d exceeds max %d", outLen, maxDecodeLen)
 	}
 	dc := DotCodec{}
 	for i := uint64(0); i < outLen; i++ {
@@ -169,6 +184,9 @@ func (DotSetCodec) Decode(r io.Reader) (*DotSet, error) {
 	n, err := (Uint64Codec{}).Decode(r)
 	if err != nil {
 		return nil, err
+	}
+	if n > maxDecodeLen {
+		return nil, fmt.Errorf("dot set length %d exceeds max %d", n, maxDecodeLen)
 	}
 	ds := NewDotSet()
 	dc := DotCodec{}
@@ -211,6 +229,9 @@ func (c DotFunCodec[V]) Decode(r io.Reader) (*DotFun[V], error) {
 	n, err := (Uint64Codec{}).Decode(r)
 	if err != nil {
 		return nil, err
+	}
+	if n > maxDecodeLen {
+		return nil, fmt.Errorf("dot fun length %d exceeds max %d", n, maxDecodeLen)
 	}
 	df := NewDotFun[V]()
 	dc := DotCodec{}
@@ -257,6 +278,9 @@ func (c DotMapCodec[K, V]) Decode(r io.Reader) (*DotMap[K, V], error) {
 	n, err := (Uint64Codec{}).Decode(r)
 	if err != nil {
 		return nil, err
+	}
+	if n > maxDecodeLen {
+		return nil, fmt.Errorf("dot map length %d exceeds max %d", n, maxDecodeLen)
 	}
 	dm := NewDotMap[K, V]()
 	for i := uint64(0); i < n; i++ {
