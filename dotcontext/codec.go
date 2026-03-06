@@ -145,3 +145,39 @@ func (CausalContextCodec) Decode(r io.Reader) (*CausalContext, error) {
 	}
 	return cc, nil
 }
+
+// DotSetCodec encodes a DotSet as [uint64: len] (Dot)*
+type DotSetCodec struct{}
+
+func (DotSetCodec) Encode(w io.Writer, ds *DotSet) error {
+	if err := (Uint64Codec{}).Encode(w, uint64(ds.Len())); err != nil {
+		return err
+	}
+	dc := DotCodec{}
+	var encErr error
+	ds.Range(func(d Dot) bool {
+		if err := dc.Encode(w, d); err != nil {
+			encErr = err
+			return false
+		}
+		return true
+	})
+	return encErr
+}
+
+func (DotSetCodec) Decode(r io.Reader) (*DotSet, error) {
+	n, err := (Uint64Codec{}).Decode(r)
+	if err != nil {
+		return nil, err
+	}
+	ds := NewDotSet()
+	dc := DotCodec{}
+	for i := uint64(0); i < n; i++ {
+		d, err := dc.Decode(r)
+		if err != nil {
+			return nil, err
+		}
+		ds.Add(d)
+	}
+	return ds, nil
+}

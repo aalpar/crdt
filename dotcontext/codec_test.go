@@ -131,3 +131,38 @@ func TestCausalContextCodecEmpty(t *testing.T) {
 		t.Error("empty context should have zero max")
 	}
 }
+
+func TestDotSetCodecRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	c := DotSetCodec{}
+	ds := NewDotSet()
+	ds.Add(Dot{ID: "a", Seq: 1})
+	ds.Add(Dot{ID: "b", Seq: 3})
+
+	if err := c.Encode(&buf, ds); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dotSetEqual(ds, got) {
+		t.Error("DotSet round-trip failed")
+	}
+}
+
+func TestDotSetCodecEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	c := DotSetCodec{}
+	ds := NewDotSet()
+	if err := c.Encode(&buf, ds); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Len() != 0 {
+		t.Error("empty DotSet should decode to empty")
+	}
+}
