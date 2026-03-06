@@ -469,6 +469,144 @@ server is unreachable. Writes continue; durability confirmation and membership
 changes wait for quorum to become available. The system never stops — it
 offers reduced guarantees until the infrastructure recovers.
 
+## Failure Detection and Timeouts
+
+Timeouts are central to the design. Every non-Byzantine failure — crashed node,
+network partition, full disk — manifests identically from a peer's perspective:
+the node stopped responding. The only detection mechanism is to wait some
+duration and declare failure.
+
+### Why Logical Time Cannot Replace Wall Clocks
+
+Logical clocks (Lamport clocks, version vectors) track causality — event A
+happened before event B. They say nothing about duration. A CausalContext at
+`(alice:5, bob:3)` records which events have been observed, not when they
+happened or how long ago. You cannot express "wait 10 Lamport ticks" because
+Lamport ticks advance only when events occur. If no events occur, they don't
+advance.
+
+This is a consequence of the FLP impossibility result (Fischer, Lynch &
+Paterson, 1985): in an asynchronous system, it is impossible to distinguish a
+slow node from a dead one. No amount of logical-time machinery changes this.
+Wall-clock measurement is irreducible.
+
+### Why It Matters Less in CRDTs
+
+In consensus systems (Raft, Paxos), a timeout triggers leader election — a
+correctness-critical operation. A wrong timeout causes split brain or liveness
+failure. The timeout must be right.
+
+In a CRDT system, a timeout triggers nothing correctness-critical. Convergence
+is guaranteed regardless of delivery order, timing, or failures. A timeout
+means "stop waiting for this peer, try another" or "update this peer's
+availability estimate." Getting it wrong wastes time or bandwidth but never
+breaks correctness.
+
+**Timeouts in this system are optimization hints, not correctness requirements.**
+
+This does not mean timeouts can be hand-waved. The durability estimate, peer
+selection, and push scheduling all depend on accurate failure detection. A
+too-long timeout means continuing to push to a dead peer. A too-short timeout
+means prematurely abandoning a slow but healthy peer. Both degrade performance.
+
+### The Phi Accrual Failure Detector
+
+The most principled approach to adaptive failure detection is the phi (φ)
+accrual failure detector (Hayashibara et al., 2004). Instead of binary
+alive/dead with a fixed threshold:
+
+1. Maintain a sliding window of inter-arrival times from each peer.
+2. Compute a suspicion level φ based on how long since the last message,
+   relative to the observed distribution of inter-arrival times.
+3. Higher φ = more suspicious. The application chooses its own threshold.
+
+```
+φ = -log₁₀(1 - F(t_now - t_last))
+
+where F is the CDF of the observed inter-arrival distribution
+and t_last is the timestamp of the last received message
+```
+
+Key properties:
+
+- **Adaptive.** Automatically adjusts to each peer's actual behavior. A phone
+  that responds every 30 seconds gets a different distribution than a server
+  that responds every 100ms.
+- **Continuous.** Suspicion is a scalar, not binary. Different operations can
+  use different thresholds: a durability estimate might tolerate φ = 3 (low
+  confidence of failure), while peer eviction might require φ = 8 (high
+  confidence).
+- **Per-peer.** Each peer relationship maintains its own arrival window and
+  distribution. No global timeout value.
+- **Production-proven.** Used in Cassandra and Akka.
+
+### CRDT-Specific Optimizations
+
+The causal context carries implicit liveness information:
+
+- **Deltas are heartbeats.** During active replication, the arrival of new
+  deltas from a peer is direct evidence of liveness. No dedicated heartbeat
+  protocol is needed while data is flowing.
+- **Heartbeats are only needed during quiet periods.** When a peer has no new
+  deltas, a lightweight keepalive confirms liveness without data overhead.
+- **Node properties inform initial estimates.** A peer with declared
+  availability 0.3 should start with a much wider inter-arrival distribution
+  than one with availability 0.999. The phi detector adapts regardless, but
+  good initial estimates reduce the warm-up period.
+
+### Timeout Policy
+
+The failure detector informs but does not dictate policy. Different operations
+use the suspicion level differently:
+
+| Operation              | Suspicion threshold | Consequence of wrong call       |
+|------------------------|--------------------|---------------------------------|
+| Push peer selection    | Low (φ ~ 1-2)      | Waste bandwidth on likely-dead peer |
+| Durability estimation  | Medium (φ ~ 3-5)   | Over/underestimate write safety |
+| Peer eviction          | High (φ ~ 8-12)    | Lose a peer; must re-establish  |
+| n-k membership change  | Very high (φ ~ 12+) | Trigger threshold reconfiguration |
+
+Low thresholds are cheap to get wrong (retry with another peer). High
+thresholds are expensive (removing a peer from the n-k subsystem is
+disruptive). The cost of a wrong decision determines the threshold.
+
+### Membership Protocol
+
+Failure detection and membership are related but distinct. Failure detection
+asks "is this peer alive right now?" Membership asks "who are the current
+members of the system?"
+
+The SWIM protocol (Das, Gupta & Motivala, 2002) combines both:
+
+- **Failure detection** via randomized probing: ping a random peer; if no
+  response, ask k other peers to probe it (indirect ping). This avoids false
+  positives from transient network issues between specific node pairs.
+- **Membership dissemination** via infection-style gossip: membership changes
+  (joins, failures) are piggybacked on existing protocol messages, spreading
+  epidemically without dedicated multicast.
+
+SWIM scales to large groups (O(1) per-node message load) and tolerates network
+asymmetry (indirect probing). Whether SWIM or a simpler protocol is
+appropriate depends on the expected number of peers — a system with 5 n-k
+nodes doesn't need SWIM's scalability, but a system with 500 edge nodes might.
+
+### What Cannot Be Improved
+
+The following limitations are fundamental, not implementation gaps:
+
+- **No logical-time substitute for wall clocks** in failure detection (FLP).
+- **False positives are unavoidable.** A slow peer is indistinguishable from a
+  dead one until enough time passes. The phi detector minimizes but cannot
+  eliminate them.
+- **Statistical sampling is irreducible.** The inter-arrival distribution must
+  be estimated from observations. There is no closed-form "correct timeout."
+  The phi detector is the most principled way to do this, but it is still
+  statistical.
+
+These are not open questions — they are settled results. The system must be
+designed to tolerate false positives gracefully (which it does, because CRDTs
+don't require accurate failure detection for correctness).
+
 ## Open Questions
 
 - **Interest and eviction.** Which content does a node store locally? How does
@@ -509,14 +647,76 @@ offers reduced guarantees until the infrastructure recovers.
 
 ## References
 
+### CRDT Foundations
+
 - Almeida, P. S., Shoker, A., & Baquero, C. (2018). Delta state replicated
   data types. *Journal of Parallel and Distributed Computing*, 111, 162-173.
   [arXiv:1603.01529](https://arxiv.org/abs/1603.01529)
+  — The foundation paper. Defines dots, causal contexts, dot stores, and the
+  join algebra that this codebase implements.
+
+### Impossibility Results
+
+- Fischer, M. J., Lynch, N. A., & Paterson, M. S. (1985). Impossibility of
+  distributed consensus with one faulty process. *Journal of the ACM*, 32(2),
+  374-382.
+  [ACM](https://dl.acm.org/doi/10.1145/3149.214121) |
+  [PDF](https://groups.csail.mit.edu/tds/papers/Lynch/jacm85.pdf)
+  — Proves that in an asynchronous system, no algorithm can distinguish slow
+  from dead. Foundational result that makes wall-clock timeouts irreducible.
+
+### Failure Detection
+
+- Chandra, T. D. & Toueg, S. (1996). Unreliable failure detectors for
+  reliable distributed systems. *Journal of the ACM*, 43(2), 225-267.
+  [ACM](https://dl.acm.org/doi/10.1145/226643.226647) |
+  [PDF](https://www.cs.utexas.edu/~lorenzo/corsi/cs380d/papers/p225-chandra.pdf)
+  — Formalizes failure detector classes by completeness and accuracy
+  properties. Shows that even unreliable detectors (that make infinite
+  mistakes) suffice for consensus. Defines the theoretical framework that
+  concrete detectors like phi accrual implement.
+
+- Hayashibara, N., Defago, X., Yared, R., & Katayama, T. (2004). The phi
+  accrual failure detector. *Proc. 23rd IEEE International Symposium on
+  Reliable Distributed Systems (SRDS)*, 66-78.
+  [IEEE](https://www.computer.org/csdl/proceedings-article/srds/2004/22390066/12OmNvT2phv) |
+  [ResearchGate](https://www.researchgate.net/publication/29682135_The_ph_accrual_failure_detector)
+  — Concrete method. Outputs continuous suspicion level instead of binary
+  alive/dead. Adapts to per-peer network conditions. Used in Cassandra and
+  Akka. The recommended failure detection approach for this system.
+
+- van Renesse, R., Minsky, Y., & Hayden, M. (1998). A gossip-style failure
+  detection service. *Middleware'98*, Springer, London.
+  [Springer](https://link.springer.com/chapter/10.1007/978-1-4471-1283-9_4) |
+  [PDF](https://www.cs.cornell.edu/home/rvr/papers/GossipFD.pdf)
+  — Gossip-based failure detection that scales well and leverages network
+  topology for efficiency. Combines gossip with broadcast for partition
+  detection. Relevant to peer discovery and liveness in large groups.
+
+### Membership Protocols
+
+- Das, A., Gupta, I., & Motivala, A. (2002). SWIM: scalable weakly-consistent
+  infection-style process group membership protocol. *Proc. International
+  Conference on Dependable Systems and Networks (DSN)*, 303-312.
+  [IEEE](https://ieeexplore.ieee.org/document/1028914/) |
+  [PDF](https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf)
+  — Concrete method. Separates failure detection (randomized probing with
+  indirect ping) from membership dissemination (epidemic piggybacking).
+  O(1) per-node message load. Production-proven at Uber (Ringpop). Candidate
+  protocol for large peer groups in this system.
+
+### Quorum Systems
 
 - Peleg, D. & Wool, A. (1997). Crumbling walls: a class of practical and
   efficient quorum systems. *Distributed Computing*, 10, 87-97.
   [Springer](https://link.springer.com/article/10.1007/s004460050027)
+  — Structured quorum system where nodes are arranged in rows of varying
+  widths. Quorum = one full row + one representative from each row below.
+  Availability increases and load decreases with system size. Potential
+  alternative to uniform k-of-n for data quorums; compatibility with
+  threshold security is an open question.
 
 - Peleg, D. & Wool, A. (1998). The availability of crumbling wall quorum
   systems. *Discrete Applied Mathematics*, 83(1-3), 213-228.
   [ScienceDirect](https://www.sciencedirect.com/science/article/pii/S0166218X96000169)
+  — Companion paper analyzing availability properties of crumbling walls.
