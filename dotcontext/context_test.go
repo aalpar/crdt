@@ -290,6 +290,49 @@ func TestCausalContextMissingHolePunchMultiple(t *testing.T) {
 	}
 }
 
+func TestCausalContextMissingRemoteOutliers(t *testing.T) {
+	// local: VV{a:3}
+	// remote: VV{a:3}, outliers{a:5, a:7}
+	// VV comparison: nothing (equal). Remote outliers: {5,5}, {7,7}.
+	local := New()
+	for i := 0; i < 3; i++ {
+		local.Next("a")
+	}
+
+	remote := local.Clone()
+	remote.Add(Dot{ID: "a", Seq: 5}) // outlier
+	remote.Add(Dot{ID: "a", Seq: 7}) // outlier
+
+	got := local.Missing(remote)
+	want := map[ReplicaID][]SeqRange{
+		"a": {{Lo: 5, Hi: 5}, {Lo: 7, Hi: 7}},
+	}
+	if !missingEqual(got, want) {
+		t.Errorf("Missing() = %v, want %v", got, want)
+	}
+}
+
+func TestCausalContextMissingRemoteOutlierAlreadyObserved(t *testing.T) {
+	// local: VV{a:5}
+	// remote: VV{a:3}, outliers{a:4}
+	// VV comparison: nothing (local ahead). Remote outlier a:4: local Has it (4 <= 5). Skip.
+	local := New()
+	for i := 0; i < 5; i++ {
+		local.Next("a")
+	}
+
+	remote := New()
+	for i := 0; i < 3; i++ {
+		remote.Next("a")
+	}
+	remote.Add(Dot{ID: "a", Seq: 4}) // outlier, but local has it via VV
+
+	got := local.Missing(remote)
+	if len(got) != 0 {
+		t.Errorf("Missing() = %v, want empty", got)
+	}
+}
+
 func TestMergeRanges(t *testing.T) {
 	tcs := []struct {
 		name string

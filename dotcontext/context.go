@@ -165,12 +165,18 @@ func (p *CausalContext) Missing(remote *CausalContext) map[ReplicaID][]SeqRange 
 		}
 	}
 
-	// Clean up empty entries.
-	for id, ranges := range q {
-		if len(ranges) == 0 {
-			delete(q, id)
+	// Phase 2: remote outliers not observed locally.
+	for d := range remote.outliers {
+		if !p.Has(d) {
+			q[d.ID] = append(q[d.ID], SeqRange{Lo: d.Seq, Hi: d.Seq})
 		}
 	}
+
+	// Phase 3: merge ranges per replica (outlier singletons may be adjacent to VV ranges).
+	for id, ranges := range q {
+		q[id] = mergeRanges(ranges)
+	}
+
 	if len(q) == 0 {
 		return nil
 	}
