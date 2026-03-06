@@ -242,6 +242,54 @@ func TestCausalContextMissingPartiallyBehind(t *testing.T) {
 	}
 }
 
+func TestCausalContextMissingHolePunch(t *testing.T) {
+	// local: VV{a:3}, outliers{a:5}
+	// remote: VV{a:7}
+	// Naive missing: {4,7}. But local has a:5, so: {4,4}, {6,7}.
+	local := New()
+	local.Add(Dot{ID: "a", Seq: 1})
+	local.Add(Dot{ID: "a", Seq: 2})
+	local.Add(Dot{ID: "a", Seq: 3})
+	local.Add(Dot{ID: "a", Seq: 5}) // outlier — gap at 4
+
+	remote := New()
+	for i := 0; i < 7; i++ {
+		remote.Next("a")
+	}
+
+	got := local.Missing(remote)
+	want := map[ReplicaID][]SeqRange{
+		"a": {{Lo: 4, Hi: 4}, {Lo: 6, Hi: 7}},
+	}
+	if !missingEqual(got, want) {
+		t.Errorf("Missing() = %v, want %v", got, want)
+	}
+}
+
+func TestCausalContextMissingHolePunchMultiple(t *testing.T) {
+	// local: VV{a:2}, outliers{a:4, a:6}
+	// remote: VV{a:8}
+	// Naive: {3,8}. After punch: {3,3}, {5,5}, {7,8}.
+	local := New()
+	local.Add(Dot{ID: "a", Seq: 1})
+	local.Add(Dot{ID: "a", Seq: 2})
+	local.Add(Dot{ID: "a", Seq: 4}) // outlier
+	local.Add(Dot{ID: "a", Seq: 6}) // outlier
+
+	remote := New()
+	for i := 0; i < 8; i++ {
+		remote.Next("a")
+	}
+
+	got := local.Missing(remote)
+	want := map[ReplicaID][]SeqRange{
+		"a": {{Lo: 3, Hi: 3}, {Lo: 5, Hi: 5}, {Lo: 7, Hi: 8}},
+	}
+	if !missingEqual(got, want) {
+		t.Errorf("Missing() = %v, want %v", got, want)
+	}
+}
+
 func TestMergeRanges(t *testing.T) {
 	tcs := []struct {
 		name string

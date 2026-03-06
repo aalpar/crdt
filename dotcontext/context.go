@@ -131,13 +131,38 @@ func (p *CausalContext) Clone() *CausalContext {
 func (p *CausalContext) Missing(remote *CausalContext) map[ReplicaID][]SeqRange {
 	q := make(map[ReplicaID][]SeqRange)
 
-	// Phase 1: version vector comparison.
+	// Phase 1: version vector comparison with hole-punching.
 	for id, remoteSeq := range remote.vv {
 		localSeq := p.vv[id]
 		if remoteSeq <= localSeq {
 			continue
 		}
-		q[id] = []SeqRange{{Lo: localSeq + 1, Hi: remoteSeq}}
+		lo := localSeq + 1
+
+		// Collect local outliers for this replica within [lo, remoteSeq].
+		var holes []uint64
+		for d := range p.outliers {
+			if d.ID == id && d.Seq >= lo && d.Seq <= remoteSeq {
+				holes = append(holes, d.Seq)
+			}
+		}
+
+		if len(holes) == 0 {
+			q[id] = append(q[id], SeqRange{Lo: lo, Hi: remoteSeq})
+			continue
+		}
+
+		sort.Slice(holes, func(i, j int) bool { return holes[i] < holes[j] })
+		cursor := lo
+		for _, h := range holes {
+			if h > cursor {
+				q[id] = append(q[id], SeqRange{Lo: cursor, Hi: h - 1})
+			}
+			cursor = h + 1
+		}
+		if cursor <= remoteSeq {
+			q[id] = append(q[id], SeqRange{Lo: cursor, Hi: remoteSeq})
+		}
 	}
 
 	// Clean up empty entries.
