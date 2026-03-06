@@ -104,6 +104,19 @@ func (p *AWSet[E]) Len() int {
 	return p.state.Store.Len()
 }
 
+// State returns the AWSet's internal Causal state for serialization.
+func (p *AWSet[E]) State() dotcontext.Causal[*dotcontext.DotMap[E, *dotcontext.DotSet]] {
+	return p.state
+}
+
+// FromCausal constructs an AWSet from a decoded Causal value.
+// Used to reconstruct deltas from the wire for merging.
+func FromCausal[E comparable](
+	state dotcontext.Causal[*dotcontext.DotMap[E, *dotcontext.DotSet]],
+) *AWSet[E] {
+	return &AWSet[E]{state: state}
+}
+
 // Merge incorporates a delta or full state from another AWSet.
 func (p *AWSet[E]) Merge(other *AWSet[E]) {
 	p.state = dotcontext.JoinDotMap(p.state, other.state, joinDotSet, dotcontext.NewDotSet)

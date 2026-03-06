@@ -1,4 +1,0 @@
-go test fuzz v1
-[]byte("0001")
-[]byte("1011")
-[]byte("10010011")
