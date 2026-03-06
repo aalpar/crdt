@@ -1,5 +1,7 @@
 package dotcontext
 
+import "sort"
+
 // CausalContext is a compressed representation of a set of observed dots.
 // It combines a version vector (replica → max contiguous sequence number)
 // with a set of outlier dots above the contiguous frontier.
@@ -121,4 +123,26 @@ func (p *CausalContext) Clone() *CausalContext {
 		cc.outliers[d] = struct{}{}
 	}
 	return cc
+}
+
+// mergeRanges sorts ranges by Lo and merges overlapping or adjacent ranges.
+func mergeRanges(ranges []SeqRange) []SeqRange {
+	if len(ranges) <= 1 {
+		return ranges
+	}
+	sort.Slice(ranges, func(i, j int) bool {
+		return ranges[i].Lo < ranges[j].Lo
+	})
+	q := ranges[:1]
+	for _, r := range ranges[1:] {
+		last := &q[len(q)-1]
+		if r.Lo <= last.Hi+1 {
+			if r.Hi > last.Hi {
+				last.Hi = r.Hi
+			}
+		} else {
+			q = append(q, r)
+		}
+	}
+	return q
 }

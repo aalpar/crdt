@@ -159,3 +159,65 @@ func TestCausalContextClone(t *testing.T) {
 		t.Error("clone mutation should not affect original")
 	}
 }
+
+func TestMergeRanges(t *testing.T) {
+	tcs := []struct {
+		name string
+		in0  []SeqRange
+		out  []SeqRange
+	}{
+		{
+			name: "empty",
+			in0:  nil,
+			out:  nil,
+		},
+		{
+			name: "single",
+			in0:  []SeqRange{{Lo: 3, Hi: 5}},
+			out:  []SeqRange{{Lo: 3, Hi: 5}},
+		},
+		{
+			name: "no overlap",
+			in0:  []SeqRange{{Lo: 1, Hi: 2}, {Lo: 5, Hi: 7}},
+			out:  []SeqRange{{Lo: 1, Hi: 2}, {Lo: 5, Hi: 7}},
+		},
+		{
+			name: "adjacent merge",
+			in0:  []SeqRange{{Lo: 1, Hi: 3}, {Lo: 4, Hi: 6}},
+			out:  []SeqRange{{Lo: 1, Hi: 6}},
+		},
+		{
+			name: "overlapping merge",
+			in0:  []SeqRange{{Lo: 1, Hi: 5}, {Lo: 3, Hi: 8}},
+			out:  []SeqRange{{Lo: 1, Hi: 8}},
+		},
+		{
+			name: "unsorted input",
+			in0:  []SeqRange{{Lo: 5, Hi: 7}, {Lo: 1, Hi: 2}},
+			out:  []SeqRange{{Lo: 1, Hi: 2}, {Lo: 5, Hi: 7}},
+		},
+		{
+			name: "three ranges merge to one",
+			in0:  []SeqRange{{Lo: 1, Hi: 3}, {Lo: 7, Hi: 7}, {Lo: 4, Hi: 6}},
+			out:  []SeqRange{{Lo: 1, Hi: 7}},
+		},
+		{
+			name: "contained range",
+			in0:  []SeqRange{{Lo: 1, Hi: 10}, {Lo: 3, Hi: 5}},
+			out:  []SeqRange{{Lo: 1, Hi: 10}},
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mergeRanges(tc.in0)
+			if len(got) != len(tc.out) {
+				t.Fatalf("mergeRanges(%v) = %v, want %v", tc.in0, got, tc.out)
+			}
+			for i := range got {
+				if got[i] != tc.out[i] {
+					t.Errorf("mergeRanges(%v)[%d] = %v, want %v", tc.in0, i, got[i], tc.out[i])
+				}
+			}
+		})
+	}
+}
