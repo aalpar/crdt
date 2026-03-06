@@ -45,3 +45,27 @@ func (t *PeerTracker) Peers() []dotcontext.ReplicaID {
 func (t *PeerTracker) RemovePeer(id dotcontext.ReplicaID) {
 	delete(t.peers, id)
 }
+
+// Ack merges the given context into the peer's stored context.
+// Handles both individual dot ACKs (small context) and wholesale
+// context updates (anti-entropy CC exchange).
+// Unknown peers are ignored — AddPeer first.
+func (t *PeerTracker) Ack(id dotcontext.ReplicaID, cc *dotcontext.CausalContext) {
+	stored, ok := t.peers[id]
+	if !ok {
+		return
+	}
+	stored.Merge(cc)
+	stored.Compact()
+}
+
+// Pending returns the dots that the local context has but the named
+// peer does not, in the same format as CausalContext.Missing().
+// Returns nil for unknown peers.
+func (t *PeerTracker) Pending(id dotcontext.ReplicaID, local *dotcontext.CausalContext) map[dotcontext.ReplicaID][]dotcontext.SeqRange {
+	stored, ok := t.peers[id]
+	if !ok {
+		return nil
+	}
+	return stored.Missing(local)
+}
