@@ -125,6 +125,33 @@ func (p *CausalContext) Clone() *CausalContext {
 	return cc
 }
 
+// Missing returns the dots that remote has observed but p has not,
+// grouped by replica and compressed into sorted, non-overlapping,
+// non-adjacent SeqRange slices.
+func (p *CausalContext) Missing(remote *CausalContext) map[ReplicaID][]SeqRange {
+	q := make(map[ReplicaID][]SeqRange)
+
+	// Phase 1: version vector comparison.
+	for id, remoteSeq := range remote.vv {
+		localSeq := p.vv[id]
+		if remoteSeq <= localSeq {
+			continue
+		}
+		q[id] = []SeqRange{{Lo: localSeq + 1, Hi: remoteSeq}}
+	}
+
+	// Clean up empty entries.
+	for id, ranges := range q {
+		if len(ranges) == 0 {
+			delete(q, id)
+		}
+	}
+	if len(q) == 0 {
+		return nil
+	}
+	return q
+}
+
 // mergeRanges sorts ranges by Lo and merges overlapping or adjacent ranges.
 func mergeRanges(ranges []SeqRange) []SeqRange {
 	if len(ranges) <= 1 {

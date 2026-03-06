@@ -160,6 +160,88 @@ func TestCausalContextClone(t *testing.T) {
 	}
 }
 
+func missingEqual(got, want map[ReplicaID][]SeqRange) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for id, wantRanges := range want {
+		gotRanges, ok := got[id]
+		if !ok {
+			return false
+		}
+		if len(gotRanges) != len(wantRanges) {
+			return false
+		}
+		for i := range gotRanges {
+			if gotRanges[i] != wantRanges[i] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func TestCausalContextMissingBothEmpty(t *testing.T) {
+	local := New()
+	remote := New()
+	got := local.Missing(remote)
+	if len(got) != 0 {
+		t.Errorf("Missing between two empty contexts = %v, want empty", got)
+	}
+}
+
+func TestCausalContextMissingLocalEmpty(t *testing.T) {
+	local := New()
+	remote := New()
+	remote.Next("a")
+	remote.Next("a")
+	remote.Next("b")
+
+	got := local.Missing(remote)
+	want := map[ReplicaID][]SeqRange{
+		"a": {{Lo: 1, Hi: 2}},
+		"b": {{Lo: 1, Hi: 1}},
+	}
+	if !missingEqual(got, want) {
+		t.Errorf("Missing() = %v, want %v", got, want)
+	}
+}
+
+func TestCausalContextMissingAlreadySynced(t *testing.T) {
+	local := New()
+	local.Next("a")
+	local.Next("a")
+
+	remote := local.Clone()
+
+	got := local.Missing(remote)
+	if len(got) != 0 {
+		t.Errorf("Missing between synced contexts = %v, want empty", got)
+	}
+}
+
+func TestCausalContextMissingPartiallyBehind(t *testing.T) {
+	local := New()
+	local.Next("a") // a:1
+	local.Next("a") // a:2
+	local.Next("b") // b:1
+
+	remote := New()
+	remote.Next("a") // a:1
+	remote.Next("a") // a:2
+	remote.Next("a") // a:3
+	remote.Next("a") // a:4
+	remote.Next("b") // b:1
+
+	got := local.Missing(remote)
+	want := map[ReplicaID][]SeqRange{
+		"a": {{Lo: 3, Hi: 4}},
+	}
+	if !missingEqual(got, want) {
+		t.Errorf("Missing() = %v, want %v", got, want)
+	}
+}
+
 func TestMergeRanges(t *testing.T) {
 	tcs := []struct {
 		name string
