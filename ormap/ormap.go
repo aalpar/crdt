@@ -143,6 +143,25 @@ func (p *ORMap[K, V]) Context() *dotcontext.CausalContext {
 	return p.state.Context
 }
 
+// State returns the ORMap's internal Causal state for serialization.
+func (p *ORMap[K, V]) State() dotcontext.Causal[*dotcontext.DotMap[K, V]] {
+	return p.state
+}
+
+// FromCausal constructs an ORMap from a decoded Causal value.
+// Used to reconstruct deltas from the wire for merging.
+func FromCausal[K comparable, V dotcontext.DotStore](
+	state dotcontext.Causal[*dotcontext.DotMap[K, V]],
+	joinV func(dotcontext.Causal[V], dotcontext.Causal[V]) dotcontext.Causal[V],
+	emptyV func() V,
+) *ORMap[K, V] {
+	return &ORMap[K, V]{
+		state:  state,
+		joinV:  joinV,
+		emptyV: emptyV,
+	}
+}
+
 // Merge incorporates a delta or full state from another ORMap.
 func (p *ORMap[K, V]) Merge(other *ORMap[K, V]) {
 	p.state = dotcontext.JoinDotMap(p.state, other.state, p.joinV, p.emptyV)
