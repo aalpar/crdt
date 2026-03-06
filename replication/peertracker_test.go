@@ -109,3 +109,63 @@ func TestAckUnknownPeer(t *testing.T) {
 	cc.Add(dotcontext.Dot{ID: "a", Seq: 1})
 	tr.Ack("ghost", cc) // should not panic
 }
+
+func TestCanGCAllAcked(t *testing.T) {
+	tr := NewPeerTracker()
+	dot := dotcontext.Dot{ID: "a", Seq: 1}
+
+	cc := dotcontext.New()
+	cc.Add(dot)
+
+	tr.AddPeer("peer1", cc.Clone())
+	tr.AddPeer("peer2", cc.Clone())
+
+	if !tr.CanGC(dot) {
+		t.Error("CanGC = false, want true (all peers have dot)")
+	}
+}
+
+func TestCanGCSomeNotAcked(t *testing.T) {
+	tr := NewPeerTracker()
+	dot := dotcontext.Dot{ID: "a", Seq: 1}
+
+	has := dotcontext.New()
+	has.Add(dot)
+
+	tr.AddPeer("peer1", has)
+	tr.AddPeer("peer2", nil) // peer2 knows nothing
+
+	if tr.CanGC(dot) {
+		t.Error("CanGC = true, want false (peer2 lacks dot)")
+	}
+}
+
+func TestCanGCNoPeers(t *testing.T) {
+	tr := NewPeerTracker()
+	dot := dotcontext.Dot{ID: "a", Seq: 1}
+
+	if !tr.CanGC(dot) {
+		t.Error("CanGC = false, want true (vacuous — no peers)")
+	}
+}
+
+func TestCanGCAfterRemovePeer(t *testing.T) {
+	tr := NewPeerTracker()
+	dot := dotcontext.Dot{ID: "a", Seq: 1}
+
+	has := dotcontext.New()
+	has.Add(dot)
+
+	tr.AddPeer("peer1", has)
+	tr.AddPeer("peer2", nil) // blocks GC
+
+	if tr.CanGC(dot) {
+		t.Error("CanGC should be false before RemovePeer")
+	}
+
+	tr.RemovePeer("peer2")
+
+	if !tr.CanGC(dot) {
+		t.Error("CanGC should be true after removing lagging peer")
+	}
+}

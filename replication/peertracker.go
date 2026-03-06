@@ -69,3 +69,14 @@ func (t *PeerTracker) Pending(id dotcontext.ReplicaID, local *dotcontext.CausalC
 	}
 	return stored.Missing(local)
 }
+
+// CanGC reports whether all known peers have observed the given dot.
+// Returns true if no peers are registered (vacuous truth).
+func (t *PeerTracker) CanGC(d dotcontext.Dot) bool {
+	for _, cc := range t.peers {
+		if !cc.Has(d) {
+			return false
+		}
+	}
+	return true
+}
