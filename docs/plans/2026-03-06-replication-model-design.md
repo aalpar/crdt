@@ -33,6 +33,58 @@ availability but wastes resources. Consistently vs. efficiently: more copies
 means more durable but more costly. The strategy layer navigates these tensions
 given the physical constraints of the actual network.
 
+## The Cost of State
+
+Every byte of state a node carries has measurable costs:
+
+| Cost               | Measure                          | Scales with                   |
+|--------------------|----------------------------------|-------------------------------|
+| Memory             | Bytes stored                     | State size                    |
+| Bandwidth          | Bytes transmitted per sync       | Delta size × peer count       |
+| Merge time         | Operations per join              | State elements examined       |
+| Failure exposure   | Data at risk on node crash       | State size on failed node     |
+
+In a replicated system, these costs multiply. One redundant byte replicated to
+k peers costs k bytes of storage, k bytes of bandwidth, and k merge-time
+contributions. The replication factor is a cost multiplier on every piece of
+state. Minimizing state is not an optimization — it is a constraint with the
+same standing as bandwidth or availability.
+
+### Irreducible Minimums
+
+**Causal metadata.** Tracking causality among n replicas requires at least O(n)
+metadata — a proven lower bound (Charron-Bost, 1991). The `CausalContext`
+version vector meets this bound. The outlier set is variable overhead above the
+minimum; `Compact()` reduces it toward the floor.
+
+**Replication payload.** Delta-state CRDTs (Almeida et al., 2018) transmit only
+what changed since the last sync, not the full state. The anti-entropy
+mechanism (Demers et al., 1987) computes the minimal diff between two peers.
+Together, these ensure the bytes shipped approach the information-theoretic
+minimum: only novel information crosses the wire.
+
+### Design Implications
+
+Every design decision in this document is evaluated against state cost:
+
+- **Partial replication** — no node carries content it doesn't need. Full
+  replication is reserved for the n-k subsystem where security demands it.
+- **Metadata vs. content split** — metadata (small, O(n)) is fully replicated;
+  content (large) is partially replicated. The split exists because the costs
+  differ by orders of magnitude.
+- **Shared infrastructure** — security, durability, and replication use the
+  same k-of-n nodes and the same replication traffic. Three functions, one
+  data structure. Separate structures for each would be redundant weight.
+- **Eager push, not full-state sync** — a delta is smaller than a snapshot.
+  Eager delta push pays less bandwidth tax than periodic full-state exchange.
+- **No coordination state** — CRDTs converge without consensus. The system
+  carries no leader election state, no Paxos ballots, no Raft logs. That
+  entire category of state — and its replication cost — is absent by
+  construction.
+
+A redundant data structure is not merely inelegant — it is a measurable cost
+at every replica, on every sync, for the lifetime of the system.
+
 ## Architecture
 
 ```
@@ -155,9 +207,9 @@ model accommodates any number of tiers without modification.
 
 ### Push Policy: Data as Gravity
 
-Data flows toward higher availability, like gravity. Each node pushes deltas
-toward the most available peers it knows about. This is not a heuristic — it
-is the core strategy:
+Data flows toward higher availability. Each node pushes deltas toward the most
+available peers it knows about. This is push-based epidemic replication (Demers
+et al., 1987) directed by the availability gradient:
 
 - **Eager push from fragile nodes is mandatory.** A low-availability node (a
   client) is a sinking ship. Its data must reach a high-availability node
@@ -249,8 +301,9 @@ and can be confirmed via quorum acknowledgment, but the system never deadlocks
 on membership. Writes are always local. Quorum is an optional confirmation
 layer, not a gate.
 
-This is fundamentally different from consensus-based systems (Raft, Paxos)
-where below-quorum means hard stop. Here, fewer peers means lower (or
+This is fundamentally different from consensus-based systems — Paxos (Lamport,
+1998) and Raft (Ongaro & Ousterhout, 2014) — where below-quorum means hard
+stop. Here, fewer peers means lower (or
 unconfirmed) durability, not system failure. Degradation is graceful.
 
 This property is essential for networks of unreliable peers. In such a network,
@@ -304,8 +357,64 @@ that replicate to each other are peers.
 
 Two peers synchronize using causal context comparison. The `CausalContext`
 already supports this: compare version vectors, compute the diff, send only
-the missing deltas. This is the anti-entropy protocol from Almeida et al. 2018,
-and the machinery exists in `dotcontext/`.
+the missing deltas. This is anti-entropy synchronization (Demers et al., 1987)
+applied to delta-state CRDTs (Almeida et al., 2018), and the machinery exists
+in `dotcontext/`.
+
+Anti-entropy between known peers is **direct**, not gossip-based. In the n-k
+subsystem, servers know each other — it is a configured membership group.
+Randomized gossip solves a discovery/scalability problem that does not exist
+here. Direct anti-entropy via `Missing()` + `Fetch()` between known peers is
+simpler, deterministic, and complete.
+
+### Delta Delivery
+
+Deltas move between peers through two complementary mechanisms:
+
+**Eager push buffer.** When a mutator fires, the delta is stored in an
+in-memory `DeltaStore` indexed by the dot that created it. The delta is then
+pushed to known peers. The buffer is ephemeral — lost on crash.
+
+**Anti-entropy fallback.** When a peer reconnects after being offline or after
+a crash that lost the buffer, it exchanges `CausalContext` summaries with its
+peers. `Missing()` computes what dots the peer needs; the current CRDT state
+(not the buffer) provides the data. Anti-entropy is the primary recovery
+mechanism and the source of correctness.
+
+The buffer is an optimization for fast propagation. Anti-entropy is the
+guarantee of eventual convergence. The buffer can always be lost without
+affecting correctness.
+
+One delta per dot. Remove operations (AWSet.Remove, EWFlag.Disable) produce
+deltas with no new dots and are not indexed in the delta store. Their delivery
+is handled by the anti-entropy mechanism, which propagates causal context
+advancement.
+
+### GC Policy
+
+A delta in the eager push buffer is safe to discard when it is no longer
+needed for delivery. The GC threshold is **n** — all servers in the n-k
+subsystem must have acknowledged the delta before it is removed from the
+buffer.
+
+Why n, not k:
+
+- **The buffer is cheap.** In-memory, small deltas, short-lived. Holding
+  deltas slightly longer has negligible cost.
+- **k < n leaves a gap.** If the buffer is GC'd at k and then the node
+  crashes, the remaining k-1 servers have the data but may not have propagated
+  it to the other n-k servers yet. Anti-entropy would eventually fill the gap,
+  but why introduce a window of reduced durability when the buffer is cheap?
+- **n is simple.** Remove from buffer when all peers have acknowledged. No
+  probabilistic reasoning about "enough copies."
+
+An "already have it" acknowledgment counts the same as a fresh delivery
+acknowledgment. Both prove the peer has the data, which is what matters for
+durability.
+
+Client nodes that are not part of the n-k subsystem follow the same principle:
+GC when all known peers have acknowledged. For a client with 2 server peers,
+that means both servers must ACK.
 
 ## Discovery
 
@@ -318,24 +427,86 @@ which coexist:
 | Configured address  | Global (internet)    | One address required       |
 | Introduction        | Grows from above     | None beyond initial peer   |
 
-**Broadcast** — zero-configuration discovery on the local network (mDNS,
-multicast). A phone discovers a laptop on the same wifi. Bounded by network
-segment; does not cross the internet. Can cause broadcast storms, which limits
-reach.
+**Broadcast** — zero-configuration discovery on the local network via UDP
+broadcast. A phone discovers a laptop on the same wifi. Bounded by network
+segment; does not cross the internet. Storm mitigation via jittered beacon
+intervals (see Transport section).
 
 **Configured address** — a node is told the address of a peer (typically a
 server). Works globally. Requires out-of-band knowledge — someone must provide
-the address.
+the address. The n-k servers use configured addresses to find each other.
 
-**Introduction** — if A knows B, and B knows C, B can introduce A to C. This
-is gossip-based discovery. It requires one bootstrap connection; from there,
-the peer set grows organically. Introductions are authenticated: the
-introducing peer vouches for the new peer using credentials from the control
-plane.
+**Introduction** — if A knows B, and B knows C, B can introduce A to C.
+Requires one bootstrap connection; from there, the peer set grows
+organically. Introductions are authenticated: the introducing peer vouches
+for the new peer using credentials from the control plane.
 
 A server is a natural bootstrap point: always available, stable address,
 discoverable. A client configures one server address, connects, and learns
 about other peers through introductions.
+
+## Transport
+
+Two protocols, split by purpose:
+
+### TCP — Bulk Data
+
+Delta payloads, full state transfer (anti-entropy catch-up for big gaps), and
+anything that might exceed the MTU. TCP provides reliability, ordering, and
+flow control for data that must arrive intact. Used for WAN and LAN.
+
+### UDP — Signals
+
+Small, ACK-like messages and state transitions. Broadcast-compatible.
+Reliable in the narrow sense: the sender knows whether the message was
+received. All payloads designed to fit in a single UDP datagram (well under
+MTU).
+
+Messages in this category:
+
+| Message                     | Broadcast? | ACK needed?                            |
+|-----------------------------|------------|----------------------------------------|
+| Discovery beacon            | Yes        | No — periodic, next one comes soon     |
+| CausalContext summary       | No         | No — response IS the ACK               |
+| "I have new data" notify    | No         | No — next anti-entropy round catches it|
+| GC state ("I have your dots")| No        | No — if lost, sender holds buffer longer|
+
+#### Design Principles
+
+**Zero-ACK by default.** Every message is designed so that silence is safe. No
+response means "try again later." The system converges regardless because
+CRDTs make all timeouts forgiving.
+
+**Idempotent messages.** Duplicate delivery is harmless. Sequence numbers
+detect duplicates but processing a duplicate has no side effects.
+
+**Long backoffs.** Anything that might need retransmit must wait. Exponential
+backoff with long maximum ceiling. The UDP protocol is for signals, not urgent
+data — patience is built in.
+
+**No broadcast for notifications.** Discovery beacons are broadcast.
+Everything else is unicast to known peers. This prevents ACK implosion (a
+broadcast triggering N simultaneous responses).
+
+#### Anti-Entropy Initiation
+
+Anti-entropy starts over UDP: a node sends its CausalContext summary (version
+vector + outliers) to a peer. The summary is O(n) where n is the replica
+count — well under MTU for any reasonable n.
+
+The peer runs `Missing()` against the received context. If the result is
+empty, no further action — the peers are synced. If non-empty, the peer
+opens a TCP connection to fetch the missing deltas. This avoids TCP connection
+overhead in the common case (peers already synced).
+
+#### Storm Mitigation
+
+- **Discovery storms on join:** jittered beacon intervals — each node waits a
+  random delay before its first beacon.
+- **ACK implosion:** prevented by design — notifications are unicast, not
+  broadcast. The peer list is bounded and known.
+- **Retransmission pileup:** idempotent messages + sequence numbers make
+  duplicates harmless. Exponential backoff prevents retransmission floods.
 
 ## Control Plane
 
@@ -364,7 +535,8 @@ is forced by the physics of trust.
 
 A single trust anchor is a single point of failure for the control plane (even
 if the data plane is fully decentralized). The trust authority is therefore
-distributed across multiple servers using threshold operations:
+distributed across multiple servers using threshold secret sharing (Shamir,
+1979):
 
 - k-of-n servers must participate to issue credentials
 - No single server's failure breaks the trust chain
@@ -478,7 +650,7 @@ duration and declare failure.
 
 ### Why Logical Time Cannot Replace Wall Clocks
 
-Logical clocks (Lamport clocks, version vectors) track causality — event A
+Logical clocks (Lamport, 1978) and version vectors track causality — event A
 happened before event B. They say nothing about duration. A CausalContext at
 `(alice:5, bob:3)` records which events have been observed, not when they
 happened or how long ago. You cannot express "wait 10 Lamport ticks" because
@@ -492,7 +664,7 @@ Wall-clock measurement is irreducible.
 
 ### Why It Matters Less in CRDTs
 
-In consensus systems (Raft, Paxos), a timeout triggers leader election — a
+In consensus systems (Paxos, Raft), a timeout triggers leader election — a
 correctness-critical operation. A wrong timeout causes split brain or liveness
 failure. The timeout must be right.
 
@@ -621,8 +793,9 @@ don't require accurate failure detection for correctness).
 - **Peer prioritization.** When a node has multiple peers, which gets the delta
   first? Highest availability? Lowest latency? Round-robin?
 
-- **Wire protocol.** What does the delta exchange protocol look like on the
-  wire? Context comparison, delta encoding, authentication handshake.
+- **Wire protocol details.** The transport split is settled (TCP for bulk, UDP
+  for signals — see Transport section). Remaining: exact message formats,
+  framing, authentication handshake sequence, delta encoding on the wire.
 
 - **CRDT identity vs. node identity.** What is the relationship between
   `ReplicaID` in `dotcontext/` and the node's network identity?
@@ -645,6 +818,43 @@ don't require accurate failure detection for correctness).
   layer may require uniform quorums while the data layer could use structured
   ones — but this needs analysis.
 
+## Settled Decisions (from design sessions)
+
+Decisions made during iterative design conversations. Recorded here so future
+sessions don't re-derive them.
+
+### Delta Store Architecture
+
+- **Eager push buffer + anti-entropy fallback.** Two mechanisms, cleanly
+  separated. Buffer is in-memory (lost on crash). Anti-entropy from current
+  state is the recovery path.
+- **One delta per dot.** Each mutator creates one dot, one delta, indexed by
+  that dot. Remove deltas (no new dot) are not in the buffer.
+- **GC-at-n.** Remove from buffer when all n servers have acknowledged. Not k.
+  The buffer is cheap; the correctness argument for k depends on quorum
+  intersection guarantees that CRDTs don't provide and don't need.
+
+### Transport
+
+- **TCP for bulk data.** Deltas, state transfer, anything exceeding MTU.
+- **UDP for signals.** Discovery, CausalContext summaries, notifications, GC
+  state. All under MTU.
+- **Zero-ACK by default.** Messages designed so silence is safe. No explicit
+  ACK machinery for most messages.
+- **Long backoffs for retransmit.** UDP retransmissions use exponential backoff
+  with long maximum ceiling. Don't overwhelm networks.
+
+### Replication Model
+
+- **No gossip.** Direct anti-entropy between known peers. Servers in the n-k
+  subsystem know each other — randomized gossip solves a problem that doesn't
+  exist here.
+- **Anti-entropy initiation over UDP.** CausalContext summary fits under MTU.
+  If `Missing()` returns non-empty, open TCP for delta transfer. Avoids TCP
+  overhead when peers are already synced.
+- **Broadcast for discovery only.** LAN discovery via UDP broadcast. All other
+  communication is unicast to known peers.
+
 ## References
 
 ### CRDT Foundations
@@ -654,6 +864,43 @@ don't require accurate failure detection for correctness).
   [arXiv:1603.01529](https://arxiv.org/abs/1603.01529)
   — The foundation paper. Defines dots, causal contexts, dot stores, and the
   join algebra that this codebase implements.
+
+### Ordering and Logical Time
+
+- Lamport, L. (1978). Time, clocks, and the ordering of events in a
+  distributed system. *Communications of the ACM*, 21(7), 558-565.
+  [ACM](https://dl.acm.org/doi/10.1145/359545.359563)
+  — Defines logical clocks (Lamport timestamps) and the happened-before
+  relation. Establishes that logical time captures causality but not duration.
+  The argument in this document that wall-clock timeouts are irreducible
+  (Section: Failure Detection) depends on this distinction: logical clocks
+  advance only on events, so silence is invisible to them.
+
+- Charron-Bost, B. (1991). Concerning the size of logical clocks in
+  distributed systems. *Information Processing Letters*, 39(1), 11-16.
+  [ScienceDirect](https://www.sciencedirect.com/science/article/pii/002001909190055M)
+  — Proves the lower bound: tracking causality among n processes requires
+  vectors of dimension at least n. Vector clocks of size n are therefore
+  optimal — the `CausalContext` version vector meets this bound. Anything
+  above O(n) in the causal metadata is redundant overhead. The outlier set
+  is the variable cost above this floor; `Compact()` pushes it toward the
+  minimum.
+
+### Anti-Entropy and Gossip Protocols
+
+- Demers, A., Greene, D., Hauser, C., Irish, W., Larson, J., Shenker, S.,
+  Sturgis, H., Swinehart, D., & Terry, D. (1987). Epidemic algorithms for
+  replicated database maintenance. *Proc. 6th ACM Symposium on Principles of
+  Distributed Computing (PODC)*, 1-12.
+  [ACM](https://dl.acm.org/doi/10.1145/41840.41841)
+  — Foundational paper on epidemic (gossip) replication. Introduces the
+  anti-entropy protocol and the push/pull/push-pull synchronization taxonomy.
+  Two contributions to this design: (1) the anti-entropy mechanism in the
+  Peerage section is an instance of their protocol applied to delta-state
+  CRDTs, and (2) the push-toward-availability strategy in the Data Plane is
+  push-based epidemic replication directed by the availability gradient. Demers
+  et al. show that push is more effective for rapid dissemination to all nodes,
+  which grounds the "eager push from fragile nodes" policy.
 
 ### Impossibility Results
 
@@ -704,6 +951,40 @@ don't require accurate failure detection for correctness).
   indirect ping) from membership dissemination (epidemic piggybacking).
   O(1) per-node message load. Production-proven at Uber (Ringpop). Candidate
   protocol for large peer groups in this system.
+
+### Threshold Cryptography
+
+- Shamir, A. (1979). How to share a secret. *Communications of the ACM*,
+  22(11), 612-613.
+  [ACM](https://dl.acm.org/doi/10.1145/359168.359176)
+  — Concrete method. k-of-n secret sharing over a finite field: any k shares
+  reconstruct the secret, fewer than k reveal nothing. The distributed trust
+  authority in the Control Plane uses this as its cryptographic primitive —
+  k-of-n servers must cooperate to issue credentials. Implemented in the
+  companion `shamir/` project in this workspace.
+
+### Consensus Protocols (Contrast)
+
+- Lamport, L. (1998). The part-time parliament. *ACM Transactions on Computer
+  Systems*, 16(2), 133-169.
+  [ACM](https://dl.acm.org/doi/10.1145/279227.279229)
+  — Defines the Paxos consensus algorithm: quorum-for-permission, where
+  below-quorum means hard stop (no progress). This design explicitly rejects
+  this model. CRDTs guarantee convergence without consensus, so quorum here is
+  for confirmation (a weaker guarantee layered on top), not for permission.
+  The measurable difference: Paxos blocks writes when fewer than a majority
+  are reachable; this system continues writing locally with degraded durability
+  confirmation.
+
+- Ongaro, D. & Ousterhout, J. (2014). In search of an understandable
+  consensus algorithm. *Proc. USENIX Annual Technical Conference (ATC)*,
+  305-319.
+  [USENIX](https://www.usenix.org/conference/atc14/technical-sessions/presentation/ongaro)
+  — Raft consensus algorithm. Same quorum-for-permission model as Paxos with
+  different mechanics (leader election, log replication). Named alongside Paxos
+  in Section "No Quorum for Writes" as the class of systems from which this
+  design departs: below-quorum in Raft = hard stop; here = reduced guarantees,
+  never system failure.
 
 ### Quorum Systems
 
