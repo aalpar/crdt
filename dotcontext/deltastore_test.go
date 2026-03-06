@@ -81,3 +81,62 @@ func TestDeltaStoreFetchSingleRange(t *testing.T) {
 		t.Error("missing a:3")
 	}
 }
+
+func TestDeltaStoreFetchMultiReplica(t *testing.T) {
+	s := NewDeltaStore[string]()
+	s.Add(Dot{ID: "a", Seq: 1}, "a1")
+	s.Add(Dot{ID: "a", Seq: 3}, "a3")
+	s.Add(Dot{ID: "b", Seq: 2}, "b2")
+	s.Add(Dot{ID: "c", Seq: 1}, "c1")
+
+	missing := map[ReplicaID][]SeqRange{
+		"a": {{Lo: 1, Hi: 1}, {Lo: 3, Hi: 3}},
+		"b": {{Lo: 1, Hi: 5}},
+	}
+	got := s.Fetch(missing)
+
+	if len(got) != 3 {
+		t.Fatalf("Fetch() returned %d deltas, want 3: %v", len(got), got)
+	}
+	if got[Dot{ID: "a", Seq: 1}] != "a1" {
+		t.Error("missing a:1")
+	}
+	if got[Dot{ID: "a", Seq: 3}] != "a3" {
+		t.Error("missing a:3")
+	}
+	if got[Dot{ID: "b", Seq: 2}] != "b2" {
+		t.Error("missing b:2")
+	}
+	// c:1 should NOT be in result — c not in missing
+	if _, ok := got[Dot{ID: "c", Seq: 1}]; ok {
+		t.Error("c:1 should not be returned")
+	}
+}
+
+func TestDeltaStoreFetchEmpty(t *testing.T) {
+	s := NewDeltaStore[string]()
+	s.Add(Dot{ID: "a", Seq: 1}, "a1")
+
+	got := s.Fetch(nil)
+	if got != nil {
+		t.Errorf("Fetch(nil) = %v, want nil", got)
+	}
+
+	got = s.Fetch(map[ReplicaID][]SeqRange{})
+	if got != nil {
+		t.Errorf("Fetch(empty) = %v, want nil", got)
+	}
+}
+
+func TestDeltaStoreFetchNoMatches(t *testing.T) {
+	s := NewDeltaStore[string]()
+	s.Add(Dot{ID: "a", Seq: 1}, "a1")
+
+	missing := map[ReplicaID][]SeqRange{
+		"b": {{Lo: 1, Hi: 10}},
+	}
+	got := s.Fetch(missing)
+	if got != nil {
+		t.Errorf("Fetch with no matches = %v, want nil", got)
+	}
+}
