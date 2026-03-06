@@ -428,6 +428,28 @@ of data durability confirmation is zero — it falls out of the replication
 that the n-k subsystem already performs. The system pays the threshold tax
 once and uses it for all three purposes.
 
+### Constraints the n-k Subsystem Imposes
+
+Security paints the system into supporting an n-k subsystem. This is not
+optional — distributed trust requires it. Once that requirement exists, the
+n-k subsystem imposes constraints on the larger system:
+
+- **The n-k nodes must be provisioned.** They need high availability, high
+  bandwidth, and sufficient storage for full replication. The broader system
+  depends on their existence.
+- **The threshold k must be chosen.** Too low and security is weak (few nodes
+  needed to compromise trust). Too high and the subsystem is fragile (many
+  nodes must be available for threshold operations).
+- **Edge nodes depend on the n-k core.** Credential issuance, durability
+  confirmation, and content availability all flow through the core. The edge
+  is autonomous for local operations but dependent on the core for guarantees.
+
+Since the n-k subsystem exists regardless, the system should explore what else
+it enables. Quorum-confirmed durability (above) is one example. Other quorum
+models may offer additional properties — alternative quorum structures could
+provide different trade-offs between availability, load distribution, and
+fault tolerance.
+
 ### Two-Plane Independence
 
 The control plane and data plane do not block each other. Both use the shared
@@ -473,3 +495,28 @@ offers reduced guarantees until the infrastructure recovers.
 - **Trust mechanism.** The model requires authenticated peering and distributed
   trust authority. The specific cryptographic mechanism (shared secrets, PKI,
   threshold signatures) is deferred.
+
+- **Quorum models beyond k-of-n.** The n-k subsystem uses uniform threshold
+  quorums (any k-of-n). Other quorum structures may offer better properties.
+  In particular, crumbling walls (Peleg & Wool, 1997) arrange nodes in rows
+  of varying widths where a quorum = one full row + one representative from
+  every row below. This maps suggestively to the tiered model (row of many
+  edge nodes, row of fewer servers, row of core nodes). Open question: can
+  structured quorums like crumbling walls compose with uniform k-of-n
+  threshold security, or are they fundamentally incompatible? The security
+  layer may require uniform quorums while the data layer could use structured
+  ones — but this needs analysis.
+
+## References
+
+- Almeida, P. S., Shoker, A., & Baquero, C. (2018). Delta state replicated
+  data types. *Journal of Parallel and Distributed Computing*, 111, 162-173.
+  [arXiv:1603.01529](https://arxiv.org/abs/1603.01529)
+
+- Peleg, D. & Wool, A. (1997). Crumbling walls: a class of practical and
+  efficient quorum systems. *Distributed Computing*, 10, 87-97.
+  [Springer](https://link.springer.com/article/10.1007/s004460050027)
+
+- Peleg, D. & Wool, A. (1998). The availability of crumbling wall quorum
+  systems. *Discrete Applied Mathematics*, 83(1-3), 213-228.
+  [ScienceDirect](https://www.sciencedirect.com/science/article/pii/S0166218X96000169)
