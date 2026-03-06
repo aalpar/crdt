@@ -142,7 +142,7 @@ reaches into the CRDT — it only handles deltas it has been given. The interfac
 between the CRDT layer and the strategy layer is a queue of ready deltas, each
 tagged with their causal context.
 
-### Durability Is Local
+### Durability
 
 A node does not need to know the total membership of the system to reason about
 durability. It only needs to know:
@@ -163,22 +163,57 @@ Example: a phone (availability 0.3) pushes to one server (availability 0.999):
 P(survive) = 1 - (0.7)(0.001) = 0.9993
 ```
 
-No global membership knowledge. No quorum. No voting. The system provides a
-per-node, per-write durability estimate based on local information.
+No global membership knowledge. No voting. The system provides a per-node,
+per-write durability estimate based on local information.
 
-### No Quorum Requirement
+#### Quorum-Confirmed Durability
+
+The control plane already requires k-of-n server coordination for trust
+operations (see Control Plane below). Since that infrastructure exists, the
+data plane can leverage it to upgrade durability from a probabilistic estimate
+to a binary confirmation:
+
+```
+Write locally           → always succeeds (CRDT, no coordination)
+Push to peers           → eager, best-effort
+k peers acknowledge     → write is confirmed durable
+fewer than k available  → write exists but durability unconfirmed
+```
+
+The critical property: **quorum for confirmation, not for permission.** A node
+always writes locally — that never blocks. The quorum determines when a write
+is *confirmed* durable, not whether the write is *allowed*. Below-threshold
+means unconfirmed, not failed. The system never deadlocks.
+
+This is the same degradation model as the control plane: below-threshold means
+reduced guarantees, not system failure. A write in "unconfirmed" state is still
+local, still replicating via eager push, still subject to the probabilistic
+durability estimate above. Confirmation is a stronger signal layered on top,
+not a replacement.
+
+The argument for using quorum on data: since security already demands k-of-n
+server coordination, the marginal cost of data durability confirmation is low.
+The infrastructure is shared. If the system must tolerate quorum unavailability
+for security (no new credentials when fewer than k servers are reachable), it
+can tolerate the same for data confirmation (no durability confirmation when
+fewer than k peers have acknowledged).
+
+### No Quorum for Writes
 
 The system never requires N nodes to agree before making progress. A single
-node can always read and write locally. Durability improves with more peers,
-but the system never deadlocks on membership.
+node can always read and write locally. Durability improves with more peers
+and can be confirmed via quorum acknowledgment, but the system never deadlocks
+on membership. Writes are always local. Quorum is an optional confirmation
+layer, not a gate.
 
 This is fundamentally different from consensus-based systems (Raft, Paxos)
-where below-quorum means hard stop. Here, fewer peers means lower durability,
-not system failure. Degradation is graceful.
+where below-quorum means hard stop. Here, fewer peers means lower (or
+unconfirmed) durability, not system failure. Degradation is graceful.
 
 This property is essential for networks of unreliable peers. In such a network,
-total membership is unknowable at any moment. No census is possible. A quorum
-model would deadlock because the threshold cannot be computed.
+total membership is unknowable at any moment. No census is possible. A system
+that required quorum for writes would deadlock because the threshold cannot be
+computed.
 
 ### Topology Is Emergent
 
@@ -290,23 +325,37 @@ distributed across multiple servers using threshold operations:
 
 - k-of-n servers must participate to issue credentials
 - No single server's failure breaks the trust chain
-- The threshold applies only to control plane operations
+
+### Shared Infrastructure
+
+The k-of-n server coordination required for trust operations is the same
+infrastructure that supports quorum-confirmed durability on the data plane.
+Both planes share the same set of coordinating servers and the same threshold
+property. This is not a coincidence — both problems (trust and durability)
+require the same thing: confirmation from multiple high-availability nodes.
+
+Since security demands k-of-n coordination regardless, the incremental cost
+of data durability confirmation is low. The system pays the quorum tax once
+and uses it for both planes.
 
 ### Two-Plane Independence
 
-The control plane and data plane do not block each other:
+The control plane and data plane do not block each other. Both use the shared
+k-of-n infrastructure, but neither requires it for basic operation:
 
-| Operation              | Plane    | Requires servers? |
-|------------------------|----------|-------------------|
-| Local read/write       | Data     | No                |
-| Delta exchange         | Data     | No (peers only)   |
-| New node onboarding    | Control  | Yes (k-of-n)      |
-| Credential revocation  | Control  | Yes (k-of-n)      |
-| Credential renewal     | Control  | Yes (k-of-n)      |
+| Operation              | Plane    | Requires k-of-n? | Degrades to          |
+|------------------------|----------|-------------------|----------------------|
+| Local read/write       | Data     | No                | Always available     |
+| Delta exchange         | Data     | No (peers only)   | Always available     |
+| Durability confirmation| Data     | Yes (k-of-n)      | Unconfirmed writes   |
+| New node onboarding    | Control  | Yes (k-of-n)      | Deferred until quorum|
+| Credential revocation  | Control  | Yes (k-of-n)      | Deferred until quorum|
+| Credential renewal     | Control  | Yes (k-of-n)      | Deferred until quorum|
 
 A node with valid credentials can read, write, and replicate even if every
-server is unreachable. The control plane is only needed for membership changes
-— which are infrequent relative to data operations.
+server is unreachable. Writes continue; durability confirmation and membership
+changes wait for quorum to become available. The system never stops — it
+offers reduced guarantees until the infrastructure recovers.
 
 ## Open Questions
 
