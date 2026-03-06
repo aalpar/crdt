@@ -40,3 +40,8 @@ func (t *PeerTracker) Peers() []dotcontext.ReplicaID {
 	}
 	return ids
 }
+
+// RemovePeer deregisters a peer. Unknown peers are ignored.
+func (t *PeerTracker) RemovePeer(id dotcontext.ReplicaID) {
+	delete(t.peers, id)
+}

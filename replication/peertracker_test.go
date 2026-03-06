@@ -52,3 +52,22 @@ func TestAddPeerDuplicate(t *testing.T) {
 		t.Errorf("Len() = %d, want 1", tr.Len())
 	}
 }
+
+func TestRemovePeer(t *testing.T) {
+	tr := NewPeerTracker()
+	tr.AddPeer("peer1", nil)
+	tr.AddPeer("peer2", nil)
+	tr.RemovePeer("peer1")
+
+	if tr.Len() != 1 {
+		t.Errorf("Len() = %d, want 1", tr.Len())
+	}
+}
+
+func TestRemovePeerUnknown(t *testing.T) {
+	tr := NewPeerTracker()
+	tr.RemovePeer("ghost") // should not panic
+	if tr.Len() != 0 {
+		t.Errorf("Len() = %d, want 0", tr.Len())
+	}
+}
