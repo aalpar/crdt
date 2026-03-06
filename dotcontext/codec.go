@@ -59,3 +59,89 @@ func (Int64Codec) Decode(r io.Reader) (int64, error) {
 	err := binary.Read(r, binary.LittleEndian, &v)
 	return v, err
 }
+
+// DotCodec encodes a Dot as [string: ID] [uint64: Seq].
+type DotCodec struct{}
+
+func (DotCodec) Encode(w io.Writer, d Dot) error {
+	if err := (StringCodec{}).Encode(w, string(d.ID)); err != nil {
+		return err
+	}
+	return (Uint64Codec{}).Encode(w, d.Seq)
+}
+
+func (DotCodec) Decode(r io.Reader) (Dot, error) {
+	id, err := (StringCodec{}).Decode(r)
+	if err != nil {
+		return Dot{}, err
+	}
+	seq, err := (Uint64Codec{}).Decode(r)
+	if err != nil {
+		return Dot{}, err
+	}
+	return Dot{ID: ReplicaID(id), Seq: seq}, nil
+}
+
+// CausalContextCodec encodes a CausalContext as:
+// [uint64: vv_len] ([string: replicaID] [uint64: seq])* [uint64: outliers_len] (Dot)*
+type CausalContextCodec struct{}
+
+func (CausalContextCodec) Encode(w io.Writer, cc *CausalContext) error {
+	// Version vector
+	if err := (Uint64Codec{}).Encode(w, uint64(len(cc.vv))); err != nil {
+		return err
+	}
+	for id, seq := range cc.vv {
+		if err := (StringCodec{}).Encode(w, string(id)); err != nil {
+			return err
+		}
+		if err := (Uint64Codec{}).Encode(w, seq); err != nil {
+			return err
+		}
+	}
+	// Outliers
+	if err := (Uint64Codec{}).Encode(w, uint64(len(cc.outliers))); err != nil {
+		return err
+	}
+	dc := DotCodec{}
+	for d := range cc.outliers {
+		if err := dc.Encode(w, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (CausalContextCodec) Decode(r io.Reader) (*CausalContext, error) {
+	cc := New()
+	// Version vector
+	vvLen, err := (Uint64Codec{}).Decode(r)
+	if err != nil {
+		return nil, err
+	}
+	for i := uint64(0); i < vvLen; i++ {
+		id, err := (StringCodec{}).Decode(r)
+		if err != nil {
+			return nil, err
+		}
+		seq, err := (Uint64Codec{}).Decode(r)
+		if err != nil {
+			return nil, err
+		}
+		cc.vv[ReplicaID(id)] = seq
+	}
+	// Outliers
+	outLen, err := (Uint64Codec{}).Decode(r)
+	if err != nil {
+		return nil, err
+	}
+	dc := DotCodec{}
+	for i := uint64(0); i < outLen; i++ {
+		d, err := dc.Decode(r)
+		if err != nil {
+			return nil, err
+		}
+		cc.outliers[d] = struct{}{}
+	}
+	return cc, nil
+}
