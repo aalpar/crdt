@@ -283,3 +283,82 @@ func TestDotMapCodecNested(t *testing.T) {
 		t.Error("inner dot missing")
 	}
 }
+
+func TestCausalCodecDotSetRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	c := CausalCodec[*DotSet]{StoreCodec: DotSetCodec{}}
+
+	ds := NewDotSet()
+	ds.Add(Dot{ID: "a", Seq: 1})
+	cc := New()
+	cc.Add(Dot{ID: "a", Seq: 1})
+	causal := Causal[*DotSet]{Store: ds, Context: cc}
+
+	if err := c.Encode(&buf, causal); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dotSetEqual(got.Store, ds) {
+		t.Error("store mismatch")
+	}
+	if !got.Context.Has(Dot{ID: "a", Seq: 1}) {
+		t.Error("context missing dot")
+	}
+}
+
+func TestCausalCodecNestedDotMapRoundTrip(t *testing.T) {
+	// Full BlockRef delta shape: Causal[*DotMap[string, *DotMap[string, *DotSet]]]
+	var buf bytes.Buffer
+	inner := DotMapCodec[string, *DotSet]{
+		KeyCodec:   StringCodec{},
+		ValueCodec: DotSetCodec{},
+	}
+	c := CausalCodec[*DotMap[string, *DotMap[string, *DotSet]]]{
+		StoreCodec: &DotMapCodec[string, *DotMap[string, *DotSet]]{
+			KeyCodec:   StringCodec{},
+			ValueCodec: &inner,
+		},
+	}
+
+	// Build a realistic delta
+	innerMap := NewDotMap[string, *DotSet]()
+	ds := NewDotSet()
+	ds.Add(Dot{ID: "w1", Seq: 1})
+	innerMap.Set("file-a", ds)
+
+	outerMap := NewDotMap[string, *DotMap[string, *DotSet]]()
+	outerMap.Set("hash-abc", innerMap)
+
+	ctx := New()
+	ctx.Add(Dot{ID: "w1", Seq: 1})
+
+	causal := Causal[*DotMap[string, *DotMap[string, *DotSet]]]{
+		Store:   outerMap,
+		Context: ctx,
+	}
+
+	if err := c.Encode(&buf, causal); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify store
+	om, ok := got.Store.Get("hash-abc")
+	if !ok {
+		t.Fatal("missing hash-abc in decoded store")
+	}
+	ids, ok := om.Get("file-a")
+	if !ok || !ids.Has(Dot{ID: "w1", Seq: 1}) {
+		t.Error("inner dot missing after round-trip")
+	}
+	// Verify context
+	if !got.Context.Has(Dot{ID: "w1", Seq: 1}) {
+		t.Error("context dot missing")
+	}
+}

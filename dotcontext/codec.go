@@ -272,3 +272,29 @@ func (c DotMapCodec[K, V]) Decode(r io.Reader) (*DotMap[K, V], error) {
 	}
 	return dm, nil
 }
+
+// CausalCodec encodes a Causal[T] as [T: store] [CausalContext].
+type CausalCodec[T DotStore] struct {
+	StoreCodec Codec[T]
+}
+
+func (c CausalCodec[T]) Encode(w io.Writer, v Causal[T]) error {
+	if err := c.StoreCodec.Encode(w, v.Store); err != nil {
+		return err
+	}
+	return (CausalContextCodec{}).Encode(w, v.Context)
+}
+
+func (c CausalCodec[T]) Decode(r io.Reader) (Causal[T], error) {
+	store, err := c.StoreCodec.Decode(r)
+	if err != nil {
+		var zero Causal[T]
+		return zero, err
+	}
+	ctx, err := (CausalContextCodec{}).Decode(r)
+	if err != nil {
+		var zero Causal[T]
+		return zero, err
+	}
+	return Causal[T]{Store: store, Context: ctx}, nil
+}
