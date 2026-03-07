@@ -69,6 +69,13 @@ Each composes dotcontext types. Mutators return deltas for replication.
 - `go test -bench=. -benchmem ./dotcontext/` — benchmarks
 - **After changes**: `make lint && make && make test`
 
+## Document Naming
+
+Files in `docs/plans/`:
+
+- **Permanent** — `ALL-CAPS-AND-DASHES.md`. Long-lived design docs that stay current.
+- **Ephemeral** — `YYYY-MM-DD-lowercase-name.md`. Committed at least once (recoverable via git history), may not survive beyond one commit. Implementation plans, scratch designs, session notes.
+
 ## Commits
 
 - Direct push to master is fine at this stage

@@ -779,44 +779,16 @@ These are not open questions — they are settled results. The system must be
 designed to tolerate false positives gracefully (which it does, because CRDTs
 don't require accurate failure detection for correctness).
 
-## Open Questions
+## Deferred Questions
 
-- **Interest and eviction.** Which content does a node store locally? How does
-  it decide what to keep and what to evict when storage is full? Interest-based
-  subscription, LRU, or explicit pinning?
-
-- **Content routing.** When a node needs content it doesn't have, how does it
-  find a peer that has it? Metadata says what exists, but not where it lives.
-  Options: query peers, maintain a location index, or use the metadata
-  propagation path as a hint.
-
-- **Peer prioritization.** When a node has multiple peers, which gets the delta
-  first? Highest availability? Lowest latency? Round-robin?
-
-- **Wire protocol details.** The transport split is settled (TCP for bulk, UDP
-  for signals — see Transport section). Remaining: exact message formats,
-  framing, authentication handshake sequence, delta encoding on the wire.
-
-- **CRDT identity vs. node identity.** What is the relationship between
-  `ReplicaID` in `dotcontext/` and the node's network identity?
-
-- **Multi-CRDT coordination.** How do multiple CRDT instances relate? Does a
-  node subscribe to specific CRDTs, or replicate all of them?
-
-- **Trust mechanism.** The model requires authenticated peering and distributed
-  trust authority. The specific cryptographic mechanism (shared secrets, PKI,
-  threshold signatures) is deferred.
-
-- **Quorum models beyond k-of-n.** The n-k subsystem uses uniform threshold
-  quorums (any k-of-n). Other quorum structures may offer better properties.
-  In particular, crumbling walls (Peleg & Wool, 1997) arrange nodes in rows
-  of varying widths where a quorum = one full row + one representative from
-  every row below. This maps suggestively to the tiered model (row of many
-  edge nodes, row of fewer servers, row of core nodes). Open question: can
-  structured quorums like crumbling walls compose with uniform k-of-n
-  threshold security, or are they fundamentally incompatible? The security
-  layer may require uniform quorums while the data layer could use structured
-  ones — but this needs analysis.
+- **Quorum models beyond k-of-n.** Deferred to the federation layer. Within
+  a single cluster (same trust domain, simple PKI), uniform k-of-n quorums
+  are unnecessary — there is no threshold security requirement. Structured
+  quorum models like crumbling walls (Peleg & Wool, 1997) become relevant
+  when clusters federate across trust boundaries using Shamir k-of-n (see
+  Trust Mechanism section). At that point, the question of whether
+  structured quorums compose with threshold security applies to the
+  federation layer, not the intra-cluster replication model.
 
 ## Settled Decisions (from design sessions)
 
@@ -844,6 +816,36 @@ sessions don't re-derive them.
 - **Long backoffs for retransmit.** UDP retransmissions use exponential backoff
   with long maximum ceiling. Don't overwhelm networks.
 
+### Identity and Stores
+
+- **Store is the replication unit.** A store is a logical body of data with one
+  CausalContext. All participants in a store share the same causal universe.
+  Dots within a store are causally ordered; dots across stores are independent.
+  Within a store, CRDTs compose via ORMap nesting — "multiple CRDTs" is ORMap
+  composition, not multiple independent instances.
+
+- **Full context, partial data.** Every participant in a store replicates the
+  full CausalContext (metadata). Data (DotMap contents) is partially replicated
+  based on interest. The n-k servers hold full data + full context. Edge/client
+  nodes hold partial data + full context. Context growth is bounded by distinct
+  replicas (one VV entry per ReplicaID), not by operations or data size.
+
+- **Three-layer identity model.** Network identity (addresses — how to reach a
+  node), NodeID (stable global identity across stores), and ReplicaID (dot
+  attribution within the algebra). ReplicaID = NodeID — the same string.
+  Disambiguation is structural: which store's CausalContext you're looking at,
+  not which ReplicaID. A node participating in 3 stores has one NodeID
+  appearing in 3 independent CausalContexts.
+
+- **Replica retirement via all-n-ACK.** A VV entry for a permanently gone
+  replica can be removed once all n servers confirm they've merged all of that
+  replica's dots. Same gate as delta GC — `Missing()` between servers for the
+  retired replica's dots must return empty. This bounds VV growth: entries
+  don't accumulate forever, they're cleaned up with the same machinery as
+  delta buffer eviction. Retirement is a control plane operation triggered
+  after high-confidence failure detection and explicit removal from the trust
+  group.
+
 ### Replication Model
 
 - **No gossip.** Direct anti-entropy between known peers. Servers in the n-k
@@ -854,6 +856,170 @@ sessions don't re-derive them.
   overhead when peers are already synced.
 - **Broadcast for discovery only.** LAN discovery via UDP broadcast. All other
   communication is unicast to known peers.
+
+### Application-Layer Replication
+
+The replication model supports partial replication generically: full
+metadata (CausalContext) replicated to all participants, content
+replicated based on application-defined interest. Application-specific
+decisions — interest expression, content routing, eviction policy — are
+defined by the application layer, not the CRDT library.
+
+For tessera's application-layer replication design (files, blocks,
+recipes, content routing, eviction), see
+`tessera/docs/plans/REPLICATION-DESIGN.md`.
+
+### Peer Prioritization
+
+- **Peer budget.** Each node declares an explicit peer budget — the number
+  of server peers it will maintain — based on its own properties (bandwidth,
+  battery, connectivity). A phone on cellular might budget 1 server peer.
+  A desktop on a wired LAN might budget all servers. Servers peer with all
+  other servers in the n-k subsystem (settled).
+
+- **Phi accrual selects peers.** The peer budget creates slots. The phi
+  accrual failure detector — already maintained per-peer — provides the
+  selection signal. Fill slots with the most responsive servers (lowest
+  latency, highest liveness confidence).
+
+- **Dynamic peer set.** If a peer's phi rises (suspicion of failure), the
+  slot opens and the next-best available server fills it. No explicit
+  eviction timer — the phi threshold for peer replacement is a policy
+  decision, like other phi-based thresholds (see Failure Detection section).
+
+- **Push to all peers in the set.** Eager push to every peer is already
+  settled (peerage model). The peer budget limits the fan-out. A client
+  with budget 1 pushes to 1 server; server-to-server replication handles
+  fan-out within the n-k subsystem.
+
+### Store Membership
+
+- **Server list = AWSet[NodeID] in the store.** The server membership list
+  is a CRDT within the store, using the same CausalContext and replication
+  path as all other data. Adding or removing a server is a CRDT operation
+  that produces a delta. Convergence is guaranteed by the algebra — no
+  consensus protocol for the list itself.
+
+- **Authorization gates the operation, not the convergence.** The replication
+  layer validates incoming deltas: is this delta's ReplicaID a current
+  member of the server list? If yes, merge. If no, drop. The CRDT algebra
+  is unchanged — authorization is a filter on the replication path.
+
+- **Any server can modify membership.** Within the same trust domain, any
+  current server can add or remove members by operating on the AWSet. If
+  the trust model evolves to cross-boundary, Shamir k-of-n can be wired
+  in as an authorization filter (see Trust Mechanism section).
+
+- **Bootstrap.** The first server creates the store with itself as the sole
+  member, generates its keypair, and adds its `{NodeID, PublicKey}` to the
+  server list AWSet.
+
+- **Server removal.** When a server is removed from the AWSet, its future
+  deltas are rejected by other servers (no longer a current member). Its
+  past deltas remain merged. Replica retirement (all-n-ACK, settled) cleans
+  up its VV entry.
+
+- **Client membership is implicit.** Clients do not appear in any membership
+  list. A client authenticates (trust mechanism), then anti-entropy from
+  empty state provides the initial CausalContext and metadata sync. A
+  writing client's existence is implicit in its dots. A read-only client
+  is invisible to the server. No join announcement, no leave protocol.
+
+- **Join = anti-entropy from empty.** No special join handshake for data
+  sync. A new participant (server or client) starts with empty state.
+  `Missing()` on empty CC returns everything. The existing anti-entropy
+  mechanism handles initial sync identically to a node reconnecting after
+  extended absence. For servers, this includes full data transfer; for
+  clients, metadata only (blocks pulled on demand).
+
+- **Leave = phi detects absence.** No explicit leave protocol required.
+  Graceful departure can accelerate detection. For servers, high-confidence
+  phi triggers membership removal and replica retirement. For clients,
+  nothing to clean up unless the client was a writer (replica retirement
+  handles its VV entry).
+
+### Trust Mechanism
+
+- **Same trust domain.** Servers are controlled by the same entity. The
+  threat model is unauthorized external access, not internal server
+  compromise. This makes k-of-n threshold security unnecessary for the
+  current design — simple PKI is proportional to the actual threat.
+
+- **Mutual TLS with pinned public keys.** Each server generates an ed25519
+  keypair. The server list AWSet holds `{NodeID, PublicKey}` entries.
+  Connecting peers authenticate via mutual TLS, verifying the peer's
+  certificate against the public key in the CRDT. Standard TLS libraries
+  handle the cryptography.
+
+- **Any server can modify membership.** Since servers share a trust domain,
+  any current server can add or remove members by operating on the server
+  list AWSet. No k-of-n gate required. This is a deliberate simplification
+  — if the trust model evolves to span trust boundaries, the `shamir/`
+  project provides k-of-n threshold primitives (VSS, proactive refresh)
+  that can be wired in as an authorization filter on membership operations.
+
+- **Client authentication via server-issued tokens.** Any server can issue
+  a short-lived credential for a client. The client presents this on
+  connection. Servers verify against their own issuance or against a
+  shared token format. Clients do not need keypairs.
+
+- **Data in transit protected by TLS.** All TCP connections (delta transfer,
+  block fetching, state transfer) use TLS. UDP signals (discovery,
+  CausalContext summaries, HAVE queries) are not encrypted — they carry
+  no sensitive data (hashes, version vectors, presence signals).
+
+- **Shamir remains available.** The `shamir/` project implements Shamir
+  secret sharing, Feldman/Pedersen VSS, and proactive share refresh. If
+  the trust model evolves to cross-boundary (servers controlled by
+  different entities), these primitives gate membership changes: k-of-n
+  servers must cooperate to authorize additions, and proactive refresh
+  invalidates removed servers' shares. This is a future upgrade, not a
+  current requirement.
+
+### Wire Protocol
+
+- **Codec infrastructure exists.** Binary codecs for all dotcontext types
+  are implemented in `dotcontext/codec.go`: `CausalContextCodec`,
+  `DotCodec`, `DotSetCodec`, `DotFunCodec`, `DotMapCodec`, `MissingCodec`,
+  `DeltaBatchCodec[T]`, `CausalCodec[T]`. All use length-prefixed
+  little-endian binary encoding with `maxDecodeLen` caps against malformed
+  input.
+
+- **Anti-entropy composition exists.** `replication/antientropy.go`
+  provides `WriteDeltaBatch` and `ReadDeltaBatch`, composing `Missing()`,
+  `DeltaStore.Fetch`, and `DeltaBatchCodec` into a complete
+  request-response flow over `io.Reader`/`io.Writer`.
+
+- **Delta payloads are opaque.** The `Codec[T]` interface lets the
+  application supply its own serialization for delta values. The
+  replication layer encodes framing (dots, contexts, batch counts) and
+  delegates payload encoding to the caller. This preserves `crdt`'s
+  independence from application types.
+
+- **Message framing.** TCP: `[4-byte big-endian length][1-byte type]
+  [payload]`. UDP: `[1-byte type][payload]` (datagram boundary is the
+  frame). Message types are partitioned: `0x00–0x7F` reserved for `crdt`
+  replication messages, `0x80–0xFF` available for application-defined
+  messages (e.g., tessera block transfer).
+
+- **crdt message types:**
+
+  | Type | Code | Transport | Payload codec |
+  |------|------|-----------|---------------|
+  | DISCOVER | 0x01 | UDP broadcast | NodeID + PublicKey |
+  | CC_SUMMARY | 0x02 | UDP | CausalContextCodec |
+  | DELTA_BATCH | 0x10 | TCP | DeltaBatchCodec |
+  | FULL_STATE | 0x11 | TCP | CausalCodec |
+  | PEER_HELLO | 0x12 | TCP | NodeID |
+
+- **TLS wraps TCP.** All TCP connections use mutual TLS (see Trust
+  Mechanism section). The PEER_HELLO message is the first application-level
+  message after TLS handshake, identifying the NodeID for authorization
+  against the server list CRDT.
+
+- **UDP is unencrypted.** UDP signals carry no sensitive data — hashes,
+  version vectors, presence. Discovery broadcasts carry NodeID + PublicKey
+  for initial peer identification.
 
 ## References
 
