@@ -297,6 +297,144 @@ func (c DotMapCodec[K, V]) Decode(r io.Reader) (*DotMap[K, V], error) {
 	return dm, nil
 }
 
+// SeqRangeCodec encodes a SeqRange as [uint64: Lo] [uint64: Hi].
+type SeqRangeCodec struct{}
+
+func (SeqRangeCodec) Encode(w io.Writer, r SeqRange) error {
+	if err := (Uint64Codec{}).Encode(w, r.Lo); err != nil {
+		return err
+	}
+	return (Uint64Codec{}).Encode(w, r.Hi)
+}
+
+func (SeqRangeCodec) Decode(r io.Reader) (SeqRange, error) {
+	lo, err := (Uint64Codec{}).Decode(r)
+	if err != nil {
+		return SeqRange{}, err
+	}
+	hi, err := (Uint64Codec{}).Decode(r)
+	if err != nil {
+		return SeqRange{}, err
+	}
+	return SeqRange{Lo: lo, Hi: hi}, nil
+}
+
+// MissingCodec encodes a Missing result (map[ReplicaID][]SeqRange) as:
+// [uint64: num_replicas] ([string: replicaID] [uint64: num_ranges] (SeqRange)*)*
+type MissingCodec struct{}
+
+func (MissingCodec) Encode(w io.Writer, m map[ReplicaID][]SeqRange) error {
+	if err := (Uint64Codec{}).Encode(w, uint64(len(m))); err != nil {
+		return err
+	}
+	sc := StringCodec{}
+	rc := SeqRangeCodec{}
+	for id, ranges := range m {
+		if err := sc.Encode(w, string(id)); err != nil {
+			return err
+		}
+		if err := (Uint64Codec{}).Encode(w, uint64(len(ranges))); err != nil {
+			return err
+		}
+		for _, r := range ranges {
+			if err := rc.Encode(w, r); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (MissingCodec) Decode(r io.Reader) (map[ReplicaID][]SeqRange, error) {
+	n, err := (Uint64Codec{}).Decode(r)
+	if err != nil {
+		return nil, err
+	}
+	if n > maxDecodeLen {
+		return nil, fmt.Errorf("missing map length %d exceeds max %d", n, maxDecodeLen)
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	m := make(map[ReplicaID][]SeqRange, n)
+	sc := StringCodec{}
+	rc := SeqRangeCodec{}
+	for i := uint64(0); i < n; i++ {
+		id, err := sc.Decode(r)
+		if err != nil {
+			return nil, err
+		}
+		numRanges, err := (Uint64Codec{}).Decode(r)
+		if err != nil {
+			return nil, err
+		}
+		if numRanges > maxDecodeLen {
+			return nil, fmt.Errorf("range count %d exceeds max %d", numRanges, maxDecodeLen)
+		}
+		ranges := make([]SeqRange, numRanges)
+		for j := uint64(0); j < numRanges; j++ {
+			ranges[j], err = rc.Decode(r)
+			if err != nil {
+				return nil, err
+			}
+		}
+		m[ReplicaID(id)] = ranges
+	}
+	return m, nil
+}
+
+// DeltaBatchCodec encodes a batch of (Dot, T) pairs as:
+// [uint64: count] ([Dot] [T: via delta codec])*
+//
+// This is the wire format for shipping deltas over TCP. The delta codec
+// is caller-supplied, same pattern as DotFunCodec.
+type DeltaBatchCodec[T any] struct {
+	DeltaCodec Codec[T]
+}
+
+func (c DeltaBatchCodec[T]) Encode(w io.Writer, deltas map[Dot]T) error {
+	if err := (Uint64Codec{}).Encode(w, uint64(len(deltas))); err != nil {
+		return err
+	}
+	dc := DotCodec{}
+	for d, delta := range deltas {
+		if err := dc.Encode(w, d); err != nil {
+			return err
+		}
+		if err := c.DeltaCodec.Encode(w, delta); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c DeltaBatchCodec[T]) Decode(r io.Reader) (map[Dot]T, error) {
+	n, err := (Uint64Codec{}).Decode(r)
+	if err != nil {
+		return nil, err
+	}
+	if n > maxDecodeLen {
+		return nil, fmt.Errorf("delta batch length %d exceeds max %d", n, maxDecodeLen)
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	deltas := make(map[Dot]T, n)
+	dc := DotCodec{}
+	for i := uint64(0); i < n; i++ {
+		d, err := dc.Decode(r)
+		if err != nil {
+			return nil, err
+		}
+		delta, err := c.DeltaCodec.Decode(r)
+		if err != nil {
+			return nil, err
+		}
+		deltas[d] = delta
+	}
+	return deltas, nil
+}
+
 // CausalCodec encodes a Causal[T] as [T: store] [CausalContext].
 type CausalCodec[T DotStore] struct {
 	StoreCodec Codec[T]

@@ -345,6 +345,130 @@ func FuzzDecodeCausalDotSet(f *testing.F) {
 	})
 }
 
+func TestSeqRangeCodecRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	c := SeqRangeCodec{}
+	r := SeqRange{Lo: 3, Hi: 7}
+	if err := c.Encode(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != r {
+		t.Errorf("got %v, want %v", got, r)
+	}
+}
+
+func TestMissingCodecRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	c := MissingCodec{}
+	m := map[ReplicaID][]SeqRange{
+		"a": {{Lo: 1, Hi: 3}, {Lo: 7, Hi: 10}},
+		"b": {{Lo: 5, Hi: 5}},
+	}
+	if err := c.Encode(&buf, m); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d replicas, want 2", len(got))
+	}
+	aRanges := got["a"]
+	if len(aRanges) != 2 {
+		t.Fatalf("replica a: got %d ranges, want 2", len(aRanges))
+	}
+	if aRanges[0] != (SeqRange{Lo: 1, Hi: 3}) || aRanges[1] != (SeqRange{Lo: 7, Hi: 10}) {
+		t.Errorf("replica a ranges: got %v", aRanges)
+	}
+	bRanges := got["b"]
+	if len(bRanges) != 1 || bRanges[0] != (SeqRange{Lo: 5, Hi: 5}) {
+		t.Errorf("replica b ranges: got %v", bRanges)
+	}
+}
+
+func TestMissingCodecEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	c := MissingCodec{}
+	if err := c.Encode(&buf, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Errorf("expected nil, got %v", got)
+	}
+}
+
+func TestDeltaBatchCodecRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	c := DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}
+	deltas := map[Dot]int64{
+		{ID: "a", Seq: 1}: 100,
+		{ID: "b", Seq: 3}: -42,
+	}
+	if err := c.Encode(&buf, deltas); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d deltas, want 2", len(got))
+	}
+	if got[Dot{ID: "a", Seq: 1}] != 100 {
+		t.Errorf("delta (a,1): got %d, want 100", got[Dot{ID: "a", Seq: 1}])
+	}
+	if got[Dot{ID: "b", Seq: 3}] != -42 {
+		t.Errorf("delta (b,3): got %d, want -42", got[Dot{ID: "b", Seq: 3}])
+	}
+}
+
+func TestDeltaBatchCodecEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	c := DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}
+	if err := c.Encode(&buf, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Errorf("expected nil, got %v", got)
+	}
+}
+
+func FuzzDecodeMissing(f *testing.F) {
+	var buf bytes.Buffer
+	(MissingCodec{}).Encode(&buf, nil)
+	f.Add(buf.Bytes())
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		r := bytes.NewReader(data)
+		(MissingCodec{}).Decode(r)
+	})
+}
+
+func FuzzDecodeDeltaBatch(f *testing.F) {
+	var buf bytes.Buffer
+	c := DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}
+	c.Encode(&buf, nil)
+	f.Add(buf.Bytes())
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		r := bytes.NewReader(data)
+		c.Decode(r)
+	})
+}
+
 func TestCausalCodecNestedDotMapRoundTrip(t *testing.T) {
 	// Full BlockRef delta shape: Causal[*DotMap[string, *DotMap[string, *DotSet]]]
 	var buf bytes.Buffer
