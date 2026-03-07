@@ -3,10 +3,13 @@ package replication
 import (
 	"testing"
 
+	qt "github.com/frankban/quicktest"
+
 	"github.com/aalpar/crdt/dotcontext"
 )
 
 func TestGCRemovesAcked(t *testing.T) {
+	c := qt.New(t)
 	store := dotcontext.NewDeltaStore[string]()
 	tracker := NewPeerTracker()
 
@@ -21,16 +24,12 @@ func TestGCRemovesAcked(t *testing.T) {
 	tracker.AddPeer("p1", cc.Clone())
 	tracker.AddPeer("p2", cc.Clone())
 
-	removed := GC(store, tracker)
-	if removed != 2 {
-		t.Errorf("GC() = %d, want 2", removed)
-	}
-	if store.Len() != 0 {
-		t.Errorf("store.Len() = %d, want 0", store.Len())
-	}
+	c.Assert(GC(store, tracker), qt.Equals, 2)
+	c.Assert(store.Len(), qt.Equals, 0)
 }
 
 func TestGCKeepsUnacked(t *testing.T) {
+	c := qt.New(t)
 	store := dotcontext.NewDeltaStore[string]()
 	tracker := NewPeerTracker()
 
@@ -48,41 +47,29 @@ func TestGCKeepsUnacked(t *testing.T) {
 	tracker.AddPeer("p1", ccFull)
 	tracker.AddPeer("p2", ccPartial)
 
-	removed := GC(store, tracker)
-	if removed != 1 {
-		t.Errorf("GC() = %d, want 1", removed)
-	}
-	if store.Len() != 1 {
-		t.Errorf("store.Len() = %d, want 1", store.Len())
-	}
-	if _, ok := store.Get(d2); !ok {
-		t.Error("d2 should still be in store")
-	}
+	c.Assert(GC(store, tracker), qt.Equals, 1)
+	c.Assert(store.Len(), qt.Equals, 1)
+	_, ok := store.Get(d2)
+	c.Assert(ok, qt.IsTrue)
 }
 
 func TestGCEmptyStore(t *testing.T) {
+	c := qt.New(t)
 	store := dotcontext.NewDeltaStore[string]()
 	tracker := NewPeerTracker()
 	tracker.AddPeer("p1", nil)
 
-	removed := GC(store, tracker)
-	if removed != 0 {
-		t.Errorf("GC() = %d, want 0", removed)
-	}
+	c.Assert(GC(store, tracker), qt.Equals, 0)
 }
 
 func TestGCNoPeers(t *testing.T) {
+	c := qt.New(t)
 	store := dotcontext.NewDeltaStore[string]()
 	tracker := NewPeerTracker()
 
 	store.Add(dotcontext.Dot{ID: "a", Seq: 1}, "delta1")
 	store.Add(dotcontext.Dot{ID: "a", Seq: 2}, "delta2")
 
-	removed := GC(store, tracker)
-	if removed != 2 {
-		t.Errorf("GC() = %d, want 2 (vacuous — no peers)", removed)
-	}
-	if store.Len() != 0 {
-		t.Errorf("store.Len() = %d, want 0", store.Len())
-	}
+	c.Assert(GC(store, tracker), qt.Equals, 2)
+	c.Assert(store.Len(), qt.Equals, 0)
 }

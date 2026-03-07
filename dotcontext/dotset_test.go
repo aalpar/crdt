@@ -1,30 +1,28 @@
 package dotcontext
 
-import "testing"
+import (
+	"testing"
+
+	qt "github.com/frankban/quicktest"
+)
 
 func TestDotSetBasic(t *testing.T) {
+	c := qt.New(t)
 	s := NewDotSet()
 	d := Dot{ID: "a", Seq: 1}
 
-	if s.Has(d) {
-		t.Error("empty set should not have any dots")
-	}
+	c.Assert(s.Has(d), qt.IsFalse)
 
 	s.Add(d)
-	if !s.Has(d) {
-		t.Error("should have dot after add")
-	}
-	if s.Len() != 1 {
-		t.Errorf("len = %d, want 1", s.Len())
-	}
+	c.Assert(s.Has(d), qt.IsTrue)
+	c.Assert(s.Len(), qt.Equals, 1)
 
 	s.Remove(d)
-	if s.Has(d) {
-		t.Error("should not have dot after remove")
-	}
+	c.Assert(s.Has(d), qt.IsFalse)
 }
 
 func TestDotSetRange(t *testing.T) {
+	c := qt.New(t)
 	s := NewDotSet()
 	s.Add(Dot{ID: "a", Seq: 1})
 	s.Add(Dot{ID: "b", Seq: 2})
@@ -34,12 +32,11 @@ func TestDotSetRange(t *testing.T) {
 		count++
 		return true
 	})
-	if count != 2 {
-		t.Errorf("range visited %d dots, want 2", count)
-	}
+	c.Assert(count, qt.Equals, 2)
 }
 
 func TestDotSetRangeEarlyStop(t *testing.T) {
+	c := qt.New(t)
 	s := NewDotSet()
 	s.Add(Dot{ID: "a", Seq: 1})
 	s.Add(Dot{ID: "b", Seq: 2})
@@ -48,21 +45,18 @@ func TestDotSetRangeEarlyStop(t *testing.T) {
 	count := 0
 	s.Range(func(d Dot) bool {
 		count++
-		return false // stop after first
+		return false
 	})
-	if count != 1 {
-		t.Errorf("range should have stopped after 1, visited %d", count)
-	}
+	c.Assert(count, qt.Equals, 1)
 }
 
 func TestDotSetClone(t *testing.T) {
+	c := qt.New(t)
 	s := NewDotSet()
 	s.Add(Dot{ID: "a", Seq: 1})
 
-	c := s.Clone()
-	c.Add(Dot{ID: "b", Seq: 2})
+	cl := s.Clone()
+	cl.Add(Dot{ID: "b", Seq: 2})
 
-	if s.Has(Dot{ID: "b", Seq: 2}) {
-		t.Error("clone mutation should not affect original")
-	}
+	c.Assert(s.Has(Dot{ID: "b", Seq: 2}), qt.IsFalse)
 }

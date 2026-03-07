@@ -2,12 +2,14 @@ package dotcontext
 
 import (
 	"testing"
+
+	qt "github.com/frankban/quicktest"
 )
 
 // --- JoinDotSet tests ---
 
 func TestJoinDotSetBothHave(t *testing.T) {
-	// Dot in both stores → survives (intersection term).
+	c := qt.New(t)
 	d := Dot{ID: "a", Seq: 1}
 
 	a := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
@@ -19,13 +21,11 @@ func TestJoinDotSetBothHave(t *testing.T) {
 	b.Context.Add(d)
 
 	result := JoinDotSet(a, b)
-	if !result.Store.Has(d) {
-		t.Error("dot in both stores should survive join")
-	}
+	c.Assert(result.Store.Has(d), qt.IsTrue)
 }
 
 func TestJoinDotSetOnlyOneHasNotObserved(t *testing.T) {
-	// Dot in a but not observed by b → survives (s₁ \ c₂ term).
+	c := qt.New(t)
 	d := Dot{ID: "a", Seq: 1}
 
 	a := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
@@ -33,16 +33,13 @@ func TestJoinDotSetOnlyOneHasNotObserved(t *testing.T) {
 	a.Context.Add(d)
 
 	b := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
-	// b has never seen this dot
 
 	result := JoinDotSet(a, b)
-	if !result.Store.Has(d) {
-		t.Error("dot in a, unobserved by b, should survive")
-	}
+	c.Assert(result.Store.Has(d), qt.IsTrue)
 }
 
 func TestJoinDotSetOnlyOneHasButObserved(t *testing.T) {
-	// Dot in a's store, but b's context has observed it (b removed it).
+	c := qt.New(t)
 	d := Dot{ID: "a", Seq: 1}
 
 	a := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
@@ -53,13 +50,11 @@ func TestJoinDotSetOnlyOneHasButObserved(t *testing.T) {
 	b.Context.Add(d) // observed but not in store → removed
 
 	result := JoinDotSet(a, b)
-	if result.Store.Has(d) {
-		t.Error("dot removed by b should not survive")
-	}
+	c.Assert(result.Store.Has(d), qt.IsFalse)
 }
 
 func TestJoinDotSetConcurrentAdds(t *testing.T) {
-	// Two replicas concurrently add different dots.
+	c := qt.New(t)
 	da := Dot{ID: "a", Seq: 1}
 	db := Dot{ID: "b", Seq: 1}
 
@@ -72,14 +67,14 @@ func TestJoinDotSetConcurrentAdds(t *testing.T) {
 	b.Context.Add(db)
 
 	result := JoinDotSet(a, b)
-	if !result.Store.Has(da) || !result.Store.Has(db) {
-		t.Error("concurrent adds should both survive")
-	}
+	c.Assert(result.Store.Has(da), qt.IsTrue)
+	c.Assert(result.Store.Has(db), qt.IsTrue)
 }
 
 // --- JoinDotFun tests ---
 
 func TestJoinDotFunSharedDot(t *testing.T) {
+	c := qt.New(t)
 	d := Dot{ID: "a", Seq: 1}
 
 	a := Causal[*DotFun[maxInt]]{Store: NewDotFun[maxInt](), Context: New()}
@@ -92,12 +87,12 @@ func TestJoinDotFunSharedDot(t *testing.T) {
 
 	result := JoinDotFun(a, b)
 	v, ok := result.Store.Get(d)
-	if !ok || v != 7 {
-		t.Errorf("joined value = %v, want 7 (max)", v)
-	}
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v, qt.Equals, maxInt(7))
 }
 
 func TestJoinDotFunDisjoint(t *testing.T) {
+	c := qt.New(t)
 	da := Dot{ID: "a", Seq: 1}
 	db := Dot{ID: "b", Seq: 1}
 
@@ -112,12 +107,12 @@ func TestJoinDotFunDisjoint(t *testing.T) {
 	result := JoinDotFun(a, b)
 	va, _ := result.Store.Get(da)
 	vb, _ := result.Store.Get(db)
-	if va != 10 || vb != 20 {
-		t.Errorf("disjoint dots: got a=%v b=%v, want 10 and 20", va, vb)
-	}
+	c.Assert(va, qt.Equals, maxInt(10))
+	c.Assert(vb, qt.Equals, maxInt(20))
 }
 
 func TestJoinDotFunRemoved(t *testing.T) {
+	c := qt.New(t)
 	d := Dot{ID: "a", Seq: 1}
 
 	a := Causal[*DotFun[maxInt]]{Store: NewDotFun[maxInt](), Context: New()}
@@ -128,14 +123,14 @@ func TestJoinDotFunRemoved(t *testing.T) {
 	b.Context.Add(d) // observed but not in store → removed
 
 	result := JoinDotFun(a, b)
-	if _, ok := result.Store.Get(d); ok {
-		t.Error("dot removed by b should not survive")
-	}
+	_, ok := result.Store.Get(d)
+	c.Assert(ok, qt.IsFalse)
 }
 
 // --- JoinDotMap tests ---
 
 func TestJoinDotMapSharedKey(t *testing.T) {
+	c := qt.New(t)
 	da := Dot{ID: "a", Seq: 1}
 	db := Dot{ID: "b", Seq: 1}
 
@@ -163,15 +158,13 @@ func TestJoinDotMapSharedKey(t *testing.T) {
 	result := JoinDotMap(a, b, joinDS, NewDotSet)
 
 	v, ok := result.Store.Get("key")
-	if !ok {
-		t.Fatal("should have 'key' after join")
-	}
-	if !v.Has(da) || !v.Has(db) {
-		t.Error("both dots should survive in shared key join")
-	}
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v.Has(da), qt.IsTrue)
+	c.Assert(v.Has(db), qt.IsTrue)
 }
 
 func TestJoinDotMapKeyOnlyOneSide(t *testing.T) {
+	c := qt.New(t)
 	d := Dot{ID: "a", Seq: 1}
 
 	a := Causal[*DotMap[string, *DotSet]]{
@@ -187,7 +180,6 @@ func TestJoinDotMapKeyOnlyOneSide(t *testing.T) {
 		Store:   NewDotMap[string, *DotSet](),
 		Context: New(),
 	}
-	// b has never seen "key" or the dot
 
 	joinDS := func(x, y Causal[*DotSet]) Causal[*DotSet] {
 		return JoinDotSet(x, y)
@@ -195,24 +187,20 @@ func TestJoinDotMapKeyOnlyOneSide(t *testing.T) {
 	result := JoinDotMap(a, b, joinDS, NewDotSet)
 
 	v, ok := result.Store.Get("key")
-	if !ok {
-		t.Fatal("key with unobserved dot should survive")
-	}
-	if !v.Has(d) {
-		t.Error("dot should survive when unobserved by other side")
-	}
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v.Has(d), qt.IsTrue)
 }
 
 // --- Semilattice property tests ---
 
 func makeTestCausalDotSet(dots []Dot) Causal[*DotSet] {
 	s := NewDotSet()
-	c := New()
+	cc := New()
 	for _, d := range dots {
 		s.Add(d)
-		c.Add(d)
+		cc.Add(d)
 	}
-	return Causal[*DotSet]{Store: s, Context: c}
+	return Causal[*DotSet]{Store: s, Context: cc}
 }
 
 func dotSetEqual(a, b *DotSet) bool {
@@ -231,32 +219,29 @@ func dotSetEqual(a, b *DotSet) bool {
 }
 
 func TestJoinDotSetIdempotent(t *testing.T) {
+	c := qt.New(t)
 	a := makeTestCausalDotSet([]Dot{{ID: "a", Seq: 1}, {ID: "b", Seq: 2}})
 	result := JoinDotSet(a, a)
-	if !dotSetEqual(result.Store, a.Store) {
-		t.Error("join(a, a) should equal a (idempotent)")
-	}
+	c.Assert(dotSetEqual(result.Store, a.Store), qt.IsTrue)
 }
 
 func TestJoinDotSetCommutative(t *testing.T) {
+	c := qt.New(t)
 	a := makeTestCausalDotSet([]Dot{{ID: "a", Seq: 1}})
 	b := makeTestCausalDotSet([]Dot{{ID: "b", Seq: 1}})
 
 	ab := JoinDotSet(a, b)
 	ba := JoinDotSet(b, a)
-	if !dotSetEqual(ab.Store, ba.Store) {
-		t.Error("join(a, b) should equal join(b, a) (commutative)")
-	}
+	c.Assert(dotSetEqual(ab.Store, ba.Store), qt.IsTrue)
 }
 
 func TestJoinDotSetAssociative(t *testing.T) {
+	c := qt.New(t)
 	a := makeTestCausalDotSet([]Dot{{ID: "a", Seq: 1}})
 	b := makeTestCausalDotSet([]Dot{{ID: "b", Seq: 1}})
-	c := makeTestCausalDotSet([]Dot{{ID: "c", Seq: 1}})
+	x := makeTestCausalDotSet([]Dot{{ID: "c", Seq: 1}})
 
-	ab_c := JoinDotSet(JoinDotSet(a, b), c)
-	a_bc := JoinDotSet(a, JoinDotSet(b, c))
-	if !dotSetEqual(ab_c.Store, a_bc.Store) {
-		t.Error("join(join(a,b),c) should equal join(a,join(b,c)) (associative)")
-	}
+	ab_x := JoinDotSet(JoinDotSet(a, b), x)
+	a_bx := JoinDotSet(a, JoinDotSet(b, x))
+	c.Assert(dotSetEqual(ab_x.Store, a_bx.Store), qt.IsTrue)
 }

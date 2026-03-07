@@ -4,6 +4,8 @@ import (
 	"slices"
 	"testing"
 
+	qt "github.com/frankban/quicktest"
+
 	"github.com/aalpar/crdt/dotcontext"
 )
 
@@ -17,8 +19,6 @@ func newSetMap(id dotcontext.ReplicaID) *ORMap[string, *dotcontext.DotSet] {
 	return New[string, *dotcontext.DotSet](id, joinDotSet, dotcontext.NewDotSet)
 }
 
-// addDot is a common Apply fn: generate a dot and add it to both
-// the local value and the delta.
 func addDot(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotSet, delta *dotcontext.DotSet) {
 	d := ctx.Next(id)
 	v.Add(d)
@@ -26,38 +26,27 @@ func addDot(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontex
 }
 
 func TestNewEmpty(t *testing.T) {
+	c := qt.New(t)
 	m := newSetMap("a")
-	if m.Len() != 0 {
-		t.Fatalf("Len() = %d, want 0", m.Len())
-	}
-	if m.Has("x") {
-		t.Fatal("new map has key")
-	}
-	if keys := m.Keys(); len(keys) != 0 {
-		t.Fatalf("Keys() = %v, want empty", keys)
-	}
+	c.Assert(m.Len(), qt.Equals, 0)
+	c.Assert(m.Has("x"), qt.IsFalse)
+	c.Assert(m.Keys(), qt.HasLen, 0)
 }
 
 func TestApplyCreatesKey(t *testing.T) {
+	c := qt.New(t)
 	m := newSetMap("a")
 	m.Apply("x", addDot)
 
-	if !m.Has("x") {
-		t.Fatal("key missing after Apply")
-	}
-	if m.Len() != 1 {
-		t.Fatalf("Len() = %d, want 1", m.Len())
-	}
+	c.Assert(m.Has("x"), qt.IsTrue)
+	c.Assert(m.Len(), qt.Equals, 1)
 	v, ok := m.Get("x")
-	if !ok {
-		t.Fatal("Get returned false")
-	}
-	if v.Len() != 1 {
-		t.Fatalf("value has %d dots, want 1", v.Len())
-	}
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v.Len(), qt.Equals, 1)
 }
 
 func TestApplyMultipleKeys(t *testing.T) {
+	c := qt.New(t)
 	m := newSetMap("a")
 	m.Apply("x", addDot)
 	m.Apply("y", addDot)
@@ -65,72 +54,61 @@ func TestApplyMultipleKeys(t *testing.T) {
 
 	keys := m.Keys()
 	slices.Sort(keys)
-	want := []string{"x", "y", "z"}
-	if !slices.Equal(keys, want) {
-		t.Fatalf("Keys() = %v, want %v", keys, want)
-	}
+	c.Assert(keys, qt.DeepEquals, []string{"x", "y", "z"})
 }
 
 func TestApplyAccumulatesDots(t *testing.T) {
+	c := qt.New(t)
 	m := newSetMap("a")
 	m.Apply("x", addDot)
 	m.Apply("x", addDot)
 
 	v, _ := m.Get("x")
-	if v.Len() != 2 {
-		t.Fatalf("value has %d dots, want 2", v.Len())
-	}
+	c.Assert(v.Len(), qt.Equals, 2)
 }
 
 func TestApplyReturnsValidDelta(t *testing.T) {
+	c := qt.New(t)
 	m := newSetMap("a")
 	delta := m.Apply("x", addDot)
 
-	if !delta.Has("x") {
-		t.Fatal("delta missing key")
-	}
-	if delta.Len() != 1 {
-		t.Fatalf("delta Len() = %d, want 1", delta.Len())
-	}
+	c.Assert(delta.Has("x"), qt.IsTrue)
+	c.Assert(delta.Len(), qt.Equals, 1)
 }
 
 func TestRemove(t *testing.T) {
+	c := qt.New(t)
 	m := newSetMap("a")
 	m.Apply("x", addDot)
 	m.Apply("y", addDot)
 	m.Remove("x")
 
-	if m.Has("x") {
-		t.Fatal("has x after Remove")
-	}
-	if !m.Has("y") {
-		t.Fatal("missing y after Remove of x")
-	}
+	c.Assert(m.Has("x"), qt.IsFalse)
+	c.Assert(m.Has("y"), qt.IsTrue)
 }
 
 func TestRemoveAbsent(t *testing.T) {
+	c := qt.New(t)
 	m := newSetMap("a")
 	m.Remove("ghost") // should not panic
-	if m.Len() != 0 {
-		t.Fatalf("Len() = %d, want 0", m.Len())
-	}
+	c.Assert(m.Len(), qt.Equals, 0)
 }
 
 // --- Delta propagation ---
 
 func TestMergeDelta(t *testing.T) {
+	c := qt.New(t)
 	a := newSetMap("a")
 	b := newSetMap("b")
 
 	delta := a.Apply("x", addDot)
 	b.Merge(delta)
 
-	if !b.Has("x") {
-		t.Fatal("b missing x after merging delta")
-	}
+	c.Assert(b.Has("x"), qt.IsTrue)
 }
 
 func TestMergeRemoveDelta(t *testing.T) {
+	c := qt.New(t)
 	a := newSetMap("a")
 	b := newSetMap("b")
 
@@ -140,36 +118,31 @@ func TestMergeRemoveDelta(t *testing.T) {
 	rmDelta := a.Remove("x")
 	b.Merge(rmDelta)
 
-	if b.Has("x") {
-		t.Fatal("b still has x after remove delta")
-	}
+	c.Assert(b.Has("x"), qt.IsFalse)
 }
 
 // --- Add-wins semantics ---
 
 func TestAddWinsConcurrent(t *testing.T) {
+	c := qt.New(t)
 	a := newSetMap("a")
 	b := newSetMap("b")
 
 	addDelta := a.Apply("x", addDot)
-	b.Merge(addDelta) // both have x
+	b.Merge(addDelta)
 
-	// Concurrent: a removes, b adds.
 	rmDelta := a.Remove("x")
 	addDelta2 := b.Apply("x", addDot)
 
 	a.Merge(addDelta2)
 	b.Merge(rmDelta)
 
-	if !a.Has("x") {
-		t.Fatal("a: add-wins failed")
-	}
-	if !b.Has("x") {
-		t.Fatal("b: add-wins failed")
-	}
+	c.Assert(a.Has("x"), qt.IsTrue)
+	c.Assert(b.Has("x"), qt.IsTrue)
 }
 
 func TestConcurrentApplyDifferentKeys(t *testing.T) {
+	c := qt.New(t)
 	a := newSetMap("a")
 	b := newSetMap("b")
 
@@ -179,17 +152,15 @@ func TestConcurrentApplyDifferentKeys(t *testing.T) {
 	a.Merge(db)
 	b.Merge(da)
 
-	for name, m := range map[string]*ORMap[string, *dotcontext.DotSet]{"a": a, "b": b} {
+	for _, m := range []*ORMap[string, *dotcontext.DotSet]{a, b} {
 		keys := m.Keys()
 		slices.Sort(keys)
-		want := []string{"x", "y"}
-		if !slices.Equal(keys, want) {
-			t.Fatalf("%s: Keys() = %v, want %v", name, keys, want)
-		}
+		c.Assert(keys, qt.DeepEquals, []string{"x", "y"})
 	}
 }
 
 func TestConcurrentApplySameKey(t *testing.T) {
+	c := qt.New(t)
 	a := newSetMap("a")
 	b := newSetMap("b")
 
@@ -199,21 +170,17 @@ func TestConcurrentApplySameKey(t *testing.T) {
 	a.Merge(db)
 	b.Merge(da)
 
-	// Both should have x with 2 dots (one from each replica).
-	for name, m := range map[string]*ORMap[string, *dotcontext.DotSet]{"a": a, "b": b} {
+	for _, m := range []*ORMap[string, *dotcontext.DotSet]{a, b} {
 		v, ok := m.Get("x")
-		if !ok {
-			t.Fatalf("%s: missing x", name)
-		}
-		if v.Len() != 2 {
-			t.Fatalf("%s: x has %d dots, want 2", name, v.Len())
-		}
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(v.Len(), qt.Equals, 2)
 	}
 }
 
 // --- Merge properties ---
 
 func TestMergeIdempotent(t *testing.T) {
+	c := qt.New(t)
 	a := newSetMap("a")
 	a.Apply("x", addDot)
 
@@ -223,12 +190,11 @@ func TestMergeIdempotent(t *testing.T) {
 	a.Merge(snapshot)
 	a.Merge(snapshot)
 
-	if a.Len() != 1 {
-		t.Fatalf("Len() = %d, want 1", a.Len())
-	}
+	c.Assert(a.Len(), qt.Equals, 1)
 }
 
 func TestMergeCommutative(t *testing.T) {
+	c := qt.New(t)
 	a := newSetMap("a")
 	b := newSetMap("b")
 	a.Apply("x", addDot)
@@ -246,12 +212,11 @@ func TestMergeCommutative(t *testing.T) {
 	baKeys := ba.Keys()
 	slices.Sort(abKeys)
 	slices.Sort(baKeys)
-	if !slices.Equal(abKeys, baKeys) {
-		t.Fatalf("not commutative: %v vs %v", abKeys, baKeys)
-	}
+	c.Assert(abKeys, qt.DeepEquals, baKeys)
 }
 
 func TestDeltaIncrementalEqualsFullMerge(t *testing.T) {
+	c := qt.New(t)
 	a := newSetMap("a")
 	d1 := a.Apply("x", addDot)
 	d2 := a.Apply("y", addDot)
@@ -267,52 +232,47 @@ func TestDeltaIncrementalEqualsFullMerge(t *testing.T) {
 	fullKeys := full.Keys()
 	slices.Sort(incKeys)
 	slices.Sort(fullKeys)
-	if !slices.Equal(incKeys, fullKeys) {
-		t.Fatalf("incremental %v != full %v", incKeys, fullKeys)
-	}
+	c.Assert(incKeys, qt.DeepEquals, fullKeys)
 }
 
 // --- Three-replica convergence ---
 
 func TestThreeReplicaConvergence(t *testing.T) {
+	c := qt.New(t)
 	a := newSetMap("a")
 	b := newSetMap("b")
-	c := newSetMap("c")
+	x := newSetMap("c")
 
 	da := a.Apply("x", addDot)
 	db := b.Apply("y", addDot)
-	dc := c.Apply("z", addDot)
+	dx := x.Apply("z", addDot)
 
 	a.Merge(db)
-	a.Merge(dc)
+	a.Merge(dx)
 	b.Merge(da)
-	b.Merge(dc)
-	c.Merge(da)
-	c.Merge(db)
+	b.Merge(dx)
+	x.Merge(da)
+	x.Merge(db)
 
-	for name, m := range map[string]*ORMap[string, *dotcontext.DotSet]{"a": a, "b": b, "c": c} {
+	want := []string{"x", "y", "z"}
+	for _, m := range []*ORMap[string, *dotcontext.DotSet]{a, b, x} {
 		keys := m.Keys()
 		slices.Sort(keys)
-		want := []string{"x", "y", "z"}
-		if !slices.Equal(keys, want) {
-			t.Fatalf("%s: Keys() = %v, want %v", name, keys, want)
-		}
+		c.Assert(keys, qt.DeepEquals, want)
 	}
 }
 
 // --- Apply with supersede (replace pattern) ---
 
 func TestApplySupersede(t *testing.T) {
+	c := qt.New(t)
 	a := newSetMap("a")
 	b := newSetMap("b")
 
-	// a adds a dot to "x".
 	d1 := a.Apply("x", addDot)
 	b.Merge(d1)
 
-	// a supersedes the old dot with a new one.
 	d2 := a.Apply("x", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotSet, delta *dotcontext.DotSet) {
-		// Remove old dots from v (Apply captures this in delta context).
 		var old []dotcontext.Dot
 		v.Range(func(d dotcontext.Dot) bool {
 			old = append(old, d)
@@ -321,32 +281,25 @@ func TestApplySupersede(t *testing.T) {
 		for _, d := range old {
 			v.Remove(d)
 		}
-		// Add new dot to both v and delta.
 		d := ctx.Next(id)
 		v.Add(d)
 		delta.Add(d)
 	})
 	b.Merge(d2)
 
-	// b should have x with only 1 dot (the new one).
 	v, ok := b.Get("x")
-	if !ok {
-		t.Fatal("b missing x")
-	}
-	if v.Len() != 1 {
-		t.Fatalf("b has %d dots for x, want 1 (old should be superseded)", v.Len())
-	}
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v.Len(), qt.Equals, 1)
 }
 
 // --- DotFun values (map of counters) ---
 
-// counterValue for testing ORMap with DotFun values.
 type counterValue struct {
 	n int64
 }
 
-func (c counterValue) Join(other counterValue) counterValue {
-	return c
+func (cv counterValue) Join(other counterValue) counterValue {
+	return cv
 }
 
 func joinDotFun(a, b dotcontext.Causal[*dotcontext.DotFun[counterValue]]) dotcontext.Causal[*dotcontext.DotFun[counterValue]] {
@@ -362,10 +315,10 @@ func newCounterMap(id dotcontext.ReplicaID) *ORMap[string, *dotcontext.DotFun[co
 }
 
 func TestDotFunValues(t *testing.T) {
+	c := qt.New(t)
 	a := newCounterMap("a")
 	b := newCounterMap("b")
 
-	// a sets counter at "hits" to 5.
 	da := a.Apply("hits", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
 		d := ctx.Next(id)
 		v.Set(d, counterValue{n: 5})
@@ -373,8 +326,6 @@ func TestDotFunValues(t *testing.T) {
 	})
 	b.Merge(da)
 
-	// b sets counter at "hits" to 3 (concurrent).
-	// Since b already has a's dot, this is an add, not a replace.
 	db := b.Apply("hits", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
 		d := ctx.Next(id)
 		v.Set(d, counterValue{n: 3})
@@ -382,22 +333,15 @@ func TestDotFunValues(t *testing.T) {
 	})
 	a.Merge(db)
 
-	// Both should have "hits" with 2 entries (one per replica).
-	for name, m := range map[string]*ORMap[string, *dotcontext.DotFun[counterValue]]{"a": a, "b": b} {
+	for _, m := range []*ORMap[string, *dotcontext.DotFun[counterValue]]{a, b} {
 		v, ok := m.Get("hits")
-		if !ok {
-			t.Fatalf("%s: missing hits", name)
-		}
-		if v.Len() != 2 {
-			t.Fatalf("%s: hits has %d entries, want 2", name, v.Len())
-		}
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(v.Len(), qt.Equals, 2)
 		var total int64
 		v.Range(func(_ dotcontext.Dot, cv counterValue) bool {
 			total += cv.n
 			return true
 		})
-		if total != 8 {
-			t.Fatalf("%s: total = %d, want 8", name, total)
-		}
+		c.Assert(total, qt.Equals, int64(8))
 	}
 }

@@ -4,87 +4,65 @@ import (
 	"bytes"
 	"io"
 	"testing"
+
+	qt "github.com/frankban/quicktest"
 )
 
 func TestStringCodecRoundTrip(t *testing.T) {
+	c := qt.New(t)
 	var buf bytes.Buffer
-	c := StringCodec{}
-	if err := c.Encode(&buf, "hello"); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "hello" {
-		t.Errorf("got %q, want %q", got, "hello")
-	}
+	sc := StringCodec{}
+	c.Assert(sc.Encode(&buf, "hello"), qt.IsNil)
+	got, err := sc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.Equals, "hello")
 }
 
 func TestStringCodecEmpty(t *testing.T) {
+	c := qt.New(t)
 	var buf bytes.Buffer
-	c := StringCodec{}
-	if err := c.Encode(&buf, ""); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "" {
-		t.Errorf("got %q, want empty string", got)
-	}
+	sc := StringCodec{}
+	c.Assert(sc.Encode(&buf, ""), qt.IsNil)
+	got, err := sc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.Equals, "")
 }
 
 func TestUint64CodecRoundTrip(t *testing.T) {
+	c := qt.New(t)
 	var buf bytes.Buffer
-	c := Uint64Codec{}
-	if err := c.Encode(&buf, 42); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != 42 {
-		t.Errorf("got %d, want 42", got)
-	}
+	uc := Uint64Codec{}
+	c.Assert(uc.Encode(&buf, 42), qt.IsNil)
+	got, err := uc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.Equals, uint64(42))
 }
 
 func TestInt64CodecRoundTrip(t *testing.T) {
+	c := qt.New(t)
 	var buf bytes.Buffer
-	c := Int64Codec{}
-	if err := c.Encode(&buf, -7); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != -7 {
-		t.Errorf("got %d, want -7", got)
-	}
+	ic := Int64Codec{}
+	c.Assert(ic.Encode(&buf, -7), qt.IsNil)
+	got, err := ic.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.Equals, int64(-7))
 }
 
 func TestDotCodecRoundTrip(t *testing.T) {
+	c := qt.New(t)
 	var buf bytes.Buffer
-	c := DotCodec{}
+	dc := DotCodec{}
 	d := Dot{ID: "replica-1", Seq: 42}
-	if err := c.Encode(&buf, d); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != d {
-		t.Errorf("got %v, want %v", got, d)
-	}
+	c.Assert(dc.Encode(&buf, d), qt.IsNil)
+	got, err := dc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.Equals, d)
 }
 
 func TestCausalContextCodecRoundTrip(t *testing.T) {
+	c := qt.New(t)
 	var buf bytes.Buffer
-	c := CausalContextCodec{}
+	ccc := CausalContextCodec{}
 
 	cc := New()
 	cc.Add(Dot{ID: "a", Seq: 1})
@@ -92,80 +70,49 @@ func TestCausalContextCodecRoundTrip(t *testing.T) {
 	cc.Add(Dot{ID: "b", Seq: 1})
 	cc.Add(Dot{ID: "a", Seq: 5}) // outlier (gap at 3,4)
 
-	if err := c.Encode(&buf, cc); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Check version vector
-	if got.Max("a") != cc.Max("a") {
-		t.Errorf("vv[a]: got %d, want %d", got.Max("a"), cc.Max("a"))
-	}
-	if got.Max("b") != cc.Max("b") {
-		t.Errorf("vv[b]: got %d, want %d", got.Max("b"), cc.Max("b"))
-	}
-	// Check outlier survived
-	if !got.Has(Dot{ID: "a", Seq: 5}) {
-		t.Error("outlier (a,5) missing after round-trip")
-	}
-	// Check non-outlier not falsely present
-	if got.Has(Dot{ID: "a", Seq: 4}) {
-		t.Error("(a,4) should not be present")
-	}
+	c.Assert(ccc.Encode(&buf, cc), qt.IsNil)
+	got, err := ccc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Max("a"), qt.Equals, cc.Max("a"))
+	c.Assert(got.Max("b"), qt.Equals, cc.Max("b"))
+	c.Assert(got.Has(Dot{ID: "a", Seq: 5}), qt.IsTrue)
+	c.Assert(got.Has(Dot{ID: "a", Seq: 4}), qt.IsFalse)
 }
 
 func TestCausalContextCodecEmpty(t *testing.T) {
+	c := qt.New(t)
 	var buf bytes.Buffer
-	c := CausalContextCodec{}
+	ccc := CausalContextCodec{}
 	cc := New()
-	if err := c.Encode(&buf, cc); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Max("anything") != 0 {
-		t.Error("empty context should have zero max")
-	}
+	c.Assert(ccc.Encode(&buf, cc), qt.IsNil)
+	got, err := ccc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Max("anything"), qt.Equals, uint64(0))
 }
 
 func TestDotSetCodecRoundTrip(t *testing.T) {
+	c := qt.New(t)
 	var buf bytes.Buffer
-	c := DotSetCodec{}
+	dsc := DotSetCodec{}
 	ds := NewDotSet()
 	ds.Add(Dot{ID: "a", Seq: 1})
 	ds.Add(Dot{ID: "b", Seq: 3})
 
-	if err := c.Encode(&buf, ds); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !dotSetEqual(ds, got) {
-		t.Error("DotSet round-trip failed")
-	}
+	c.Assert(dsc.Encode(&buf, ds), qt.IsNil)
+	got, err := dsc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(dotSetEqual(ds, got), qt.IsTrue)
 }
 
 func TestDotSetCodecEmpty(t *testing.T) {
+	c := qt.New(t)
 	var buf bytes.Buffer
-	c := DotSetCodec{}
+	dsc := DotSetCodec{}
 	ds := NewDotSet()
-	if err := c.Encode(&buf, ds); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Len() != 0 {
-		t.Error("empty DotSet should decode to empty")
-	}
+	c.Assert(dsc.Encode(&buf, ds), qt.IsNil)
+	got, err := dsc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Len(), qt.Equals, 0)
 }
 
 type maxIntCodec struct{}
@@ -180,36 +127,32 @@ func (maxIntCodec) Decode(r io.Reader) (maxInt, error) {
 }
 
 func TestDotFunCodecRoundTrip(t *testing.T) {
+	c := qt.New(t)
 	var buf bytes.Buffer
-	c := DotFunCodec[maxInt]{ValueCodec: maxIntCodec{}}
+	fc := DotFunCodec[maxInt]{ValueCodec: maxIntCodec{}}
 
 	df := NewDotFun[maxInt]()
 	df.Set(Dot{ID: "a", Seq: 1}, maxInt(10))
 	df.Set(Dot{ID: "b", Seq: 2}, maxInt(-5))
 
-	if err := c.Encode(&buf, df); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Len() != 2 {
-		t.Fatalf("got %d entries, want 2", got.Len())
-	}
+	c.Assert(fc.Encode(&buf, df), qt.IsNil)
+	got, err := fc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Len(), qt.Equals, 2)
+
 	v, ok := got.Get(Dot{ID: "a", Seq: 1})
-	if !ok || v != 10 {
-		t.Errorf("entry (a,1): got %v/%v, want 10/true", v, ok)
-	}
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v, qt.Equals, maxInt(10))
+
 	v, ok = got.Get(Dot{ID: "b", Seq: 2})
-	if !ok || v != -5 {
-		t.Errorf("entry (b,2): got %v/%v, want -5/true", v, ok)
-	}
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v, qt.Equals, maxInt(-5))
 }
 
 func TestDotMapCodecRoundTrip(t *testing.T) {
+	c := qt.New(t)
 	var buf bytes.Buffer
-	c := DotMapCodec[string, *DotSet]{
+	mc := DotMapCodec[string, *DotSet]{
 		KeyCodec:   StringCodec{},
 		ValueCodec: DotSetCodec{},
 	}
@@ -224,35 +167,29 @@ func TestDotMapCodecRoundTrip(t *testing.T) {
 	ds2.Add(Dot{ID: "b", Seq: 3})
 	dm.Set("key2", ds2)
 
-	if err := c.Encode(&buf, dm); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Len() != 2 {
-		t.Fatalf("got %d keys, want 2", got.Len())
-	}
+	c.Assert(mc.Encode(&buf, dm), qt.IsNil)
+	got, err := mc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Len(), qt.Equals, 2)
+
 	v1, ok := got.Get("key1")
-	if !ok || v1.Len() != 1 || !v1.Has(Dot{ID: "a", Seq: 1}) {
-		t.Error("key1 mismatch")
-	}
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v1.Len(), qt.Equals, 1)
+	c.Assert(v1.Has(Dot{ID: "a", Seq: 1}), qt.IsTrue)
+
 	v2, ok := got.Get("key2")
-	if !ok || v2.Len() != 2 {
-		t.Error("key2 mismatch")
-	}
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v2.Len(), qt.Equals, 2)
 }
 
 func TestDotMapCodecNested(t *testing.T) {
-	// Two-level nesting: DotMap[string, *DotMap[string, *DotSet]]
-	// This is the BlockRef structure.
+	c := qt.New(t)
 	var buf bytes.Buffer
 	inner := DotMapCodec[string, *DotSet]{
 		KeyCodec:   StringCodec{},
 		ValueCodec: DotSetCodec{},
 	}
-	c := DotMapCodec[string, *DotMap[string, *DotSet]]{
+	mc := DotMapCodec[string, *DotMap[string, *DotSet]]{
 		KeyCodec:   StringCodec{},
 		ValueCodec: &inner,
 	}
@@ -264,60 +201,157 @@ func TestDotMapCodecNested(t *testing.T) {
 	innerMap.Set("file-a", ds)
 	outer.Set("hash-abc", innerMap)
 
-	if err := c.Encode(&buf, outer); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Len() != 1 {
-		t.Fatal("outer map should have 1 entry")
-	}
+	c.Assert(mc.Encode(&buf, outer), qt.IsNil)
+	got, err := mc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Len(), qt.Equals, 1)
+
 	im, ok := got.Get("hash-abc")
-	if !ok {
-		t.Fatal("missing hash-abc")
-	}
+	c.Assert(ok, qt.IsTrue)
 	ids, ok := im.Get("file-a")
-	if !ok || !ids.Has(Dot{ID: "w1", Seq: 1}) {
-		t.Error("inner dot missing")
-	}
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(ids.Has(Dot{ID: "w1", Seq: 1}), qt.IsTrue)
 }
 
 func TestCausalCodecDotSetRoundTrip(t *testing.T) {
+	c := qt.New(t)
 	var buf bytes.Buffer
-	c := CausalCodec[*DotSet]{StoreCodec: DotSetCodec{}}
+	cc := CausalCodec[*DotSet]{StoreCodec: DotSetCodec{}}
 
 	ds := NewDotSet()
 	ds.Add(Dot{ID: "a", Seq: 1})
-	cc := New()
-	cc.Add(Dot{ID: "a", Seq: 1})
-	causal := Causal[*DotSet]{Store: ds, Context: cc}
+	ctx := New()
+	ctx.Add(Dot{ID: "a", Seq: 1})
+	causal := Causal[*DotSet]{Store: ds, Context: ctx}
 
-	if err := c.Encode(&buf, causal); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !dotSetEqual(got.Store, ds) {
-		t.Error("store mismatch")
-	}
-	if !got.Context.Has(Dot{ID: "a", Seq: 1}) {
-		t.Error("context missing dot")
-	}
+	c.Assert(cc.Encode(&buf, causal), qt.IsNil)
+	got, err := cc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(dotSetEqual(got.Store, ds), qt.IsTrue)
+	c.Assert(got.Context.Has(Dot{ID: "a", Seq: 1}), qt.IsTrue)
 }
 
+func TestSeqRangeCodecRoundTrip(t *testing.T) {
+	c := qt.New(t)
+	var buf bytes.Buffer
+	rc := SeqRangeCodec{}
+	r := SeqRange{Lo: 3, Hi: 7}
+	c.Assert(rc.Encode(&buf, r), qt.IsNil)
+	got, err := rc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.Equals, r)
+}
+
+func TestMissingCodecRoundTrip(t *testing.T) {
+	c := qt.New(t)
+	var buf bytes.Buffer
+	mc := MissingCodec{}
+	m := map[ReplicaID][]SeqRange{
+		"a": {{Lo: 1, Hi: 3}, {Lo: 7, Hi: 10}},
+		"b": {{Lo: 5, Hi: 5}},
+	}
+	c.Assert(mc.Encode(&buf, m), qt.IsNil)
+	got, err := mc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(len(got), qt.Equals, 2)
+
+	aRanges := got["a"]
+	c.Assert(aRanges, qt.HasLen, 2)
+	c.Assert(aRanges[0], qt.Equals, SeqRange{Lo: 1, Hi: 3})
+	c.Assert(aRanges[1], qt.Equals, SeqRange{Lo: 7, Hi: 10})
+
+	bRanges := got["b"]
+	c.Assert(bRanges, qt.HasLen, 1)
+	c.Assert(bRanges[0], qt.Equals, SeqRange{Lo: 5, Hi: 5})
+}
+
+func TestMissingCodecEmpty(t *testing.T) {
+	c := qt.New(t)
+	var buf bytes.Buffer
+	mc := MissingCodec{}
+	c.Assert(mc.Encode(&buf, nil), qt.IsNil)
+	got, err := mc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.IsNil)
+}
+
+func TestDeltaBatchCodecRoundTrip(t *testing.T) {
+	c := qt.New(t)
+	var buf bytes.Buffer
+	bc := DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}
+	deltas := map[Dot]int64{
+		{ID: "a", Seq: 1}: 100,
+		{ID: "b", Seq: 3}: -42,
+	}
+	c.Assert(bc.Encode(&buf, deltas), qt.IsNil)
+	got, err := bc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(len(got), qt.Equals, 2)
+	c.Assert(got[Dot{ID: "a", Seq: 1}], qt.Equals, int64(100))
+	c.Assert(got[Dot{ID: "b", Seq: 3}], qt.Equals, int64(-42))
+}
+
+func TestDeltaBatchCodecEmpty(t *testing.T) {
+	c := qt.New(t)
+	var buf bytes.Buffer
+	bc := DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}
+	c.Assert(bc.Encode(&buf, nil), qt.IsNil)
+	got, err := bc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.IsNil)
+}
+
+func TestCausalCodecNestedDotMapRoundTrip(t *testing.T) {
+	c := qt.New(t)
+	var buf bytes.Buffer
+	inner := DotMapCodec[string, *DotSet]{
+		KeyCodec:   StringCodec{},
+		ValueCodec: DotSetCodec{},
+	}
+	cc := CausalCodec[*DotMap[string, *DotMap[string, *DotSet]]]{
+		StoreCodec: &DotMapCodec[string, *DotMap[string, *DotSet]]{
+			KeyCodec:   StringCodec{},
+			ValueCodec: &inner,
+		},
+	}
+
+	innerMap := NewDotMap[string, *DotSet]()
+	ds := NewDotSet()
+	ds.Add(Dot{ID: "w1", Seq: 1})
+	innerMap.Set("file-a", ds)
+
+	outerMap := NewDotMap[string, *DotMap[string, *DotSet]]()
+	outerMap.Set("hash-abc", innerMap)
+
+	ctx := New()
+	ctx.Add(Dot{ID: "w1", Seq: 1})
+
+	causal := Causal[*DotMap[string, *DotMap[string, *DotSet]]]{
+		Store:   outerMap,
+		Context: ctx,
+	}
+
+	c.Assert(cc.Encode(&buf, causal), qt.IsNil)
+	got, err := cc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+
+	om, ok := got.Store.Get("hash-abc")
+	c.Assert(ok, qt.IsTrue)
+	ids, ok := om.Get("file-a")
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(ids.Has(Dot{ID: "w1", Seq: 1}), qt.IsTrue)
+	c.Assert(got.Context.Has(Dot{ID: "w1", Seq: 1}), qt.IsTrue)
+}
+
+// --- Fuzz targets ---
+
 func FuzzDecodeDotSet(f *testing.F) {
-	// Seed: a valid encoded empty DotSet
 	var buf bytes.Buffer
 	(DotSetCodec{}).Encode(&buf, NewDotSet())
 	f.Add(buf.Bytes())
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		r := bytes.NewReader(data)
-		// Must not panic. Errors are fine.
 		(DotSetCodec{}).Decode(r)
 	})
 }
@@ -345,107 +379,6 @@ func FuzzDecodeCausalDotSet(f *testing.F) {
 	})
 }
 
-func TestSeqRangeCodecRoundTrip(t *testing.T) {
-	var buf bytes.Buffer
-	c := SeqRangeCodec{}
-	r := SeqRange{Lo: 3, Hi: 7}
-	if err := c.Encode(&buf, r); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != r {
-		t.Errorf("got %v, want %v", got, r)
-	}
-}
-
-func TestMissingCodecRoundTrip(t *testing.T) {
-	var buf bytes.Buffer
-	c := MissingCodec{}
-	m := map[ReplicaID][]SeqRange{
-		"a": {{Lo: 1, Hi: 3}, {Lo: 7, Hi: 10}},
-		"b": {{Lo: 5, Hi: 5}},
-	}
-	if err := c.Encode(&buf, m); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("got %d replicas, want 2", len(got))
-	}
-	aRanges := got["a"]
-	if len(aRanges) != 2 {
-		t.Fatalf("replica a: got %d ranges, want 2", len(aRanges))
-	}
-	if aRanges[0] != (SeqRange{Lo: 1, Hi: 3}) || aRanges[1] != (SeqRange{Lo: 7, Hi: 10}) {
-		t.Errorf("replica a ranges: got %v", aRanges)
-	}
-	bRanges := got["b"]
-	if len(bRanges) != 1 || bRanges[0] != (SeqRange{Lo: 5, Hi: 5}) {
-		t.Errorf("replica b ranges: got %v", bRanges)
-	}
-}
-
-func TestMissingCodecEmpty(t *testing.T) {
-	var buf bytes.Buffer
-	c := MissingCodec{}
-	if err := c.Encode(&buf, nil); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != nil {
-		t.Errorf("expected nil, got %v", got)
-	}
-}
-
-func TestDeltaBatchCodecRoundTrip(t *testing.T) {
-	var buf bytes.Buffer
-	c := DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}
-	deltas := map[Dot]int64{
-		{ID: "a", Seq: 1}: 100,
-		{ID: "b", Seq: 3}: -42,
-	}
-	if err := c.Encode(&buf, deltas); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("got %d deltas, want 2", len(got))
-	}
-	if got[Dot{ID: "a", Seq: 1}] != 100 {
-		t.Errorf("delta (a,1): got %d, want 100", got[Dot{ID: "a", Seq: 1}])
-	}
-	if got[Dot{ID: "b", Seq: 3}] != -42 {
-		t.Errorf("delta (b,3): got %d, want -42", got[Dot{ID: "b", Seq: 3}])
-	}
-}
-
-func TestDeltaBatchCodecEmpty(t *testing.T) {
-	var buf bytes.Buffer
-	c := DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}
-	if err := c.Encode(&buf, nil); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != nil {
-		t.Errorf("expected nil, got %v", got)
-	}
-}
-
 func FuzzDecodeMissing(f *testing.F) {
 	var buf bytes.Buffer
 	(MissingCodec{}).Encode(&buf, nil)
@@ -467,58 +400,4 @@ func FuzzDecodeDeltaBatch(f *testing.F) {
 		r := bytes.NewReader(data)
 		c.Decode(r)
 	})
-}
-
-func TestCausalCodecNestedDotMapRoundTrip(t *testing.T) {
-	// Full BlockRef delta shape: Causal[*DotMap[string, *DotMap[string, *DotSet]]]
-	var buf bytes.Buffer
-	inner := DotMapCodec[string, *DotSet]{
-		KeyCodec:   StringCodec{},
-		ValueCodec: DotSetCodec{},
-	}
-	c := CausalCodec[*DotMap[string, *DotMap[string, *DotSet]]]{
-		StoreCodec: &DotMapCodec[string, *DotMap[string, *DotSet]]{
-			KeyCodec:   StringCodec{},
-			ValueCodec: &inner,
-		},
-	}
-
-	// Build a realistic delta
-	innerMap := NewDotMap[string, *DotSet]()
-	ds := NewDotSet()
-	ds.Add(Dot{ID: "w1", Seq: 1})
-	innerMap.Set("file-a", ds)
-
-	outerMap := NewDotMap[string, *DotMap[string, *DotSet]]()
-	outerMap.Set("hash-abc", innerMap)
-
-	ctx := New()
-	ctx.Add(Dot{ID: "w1", Seq: 1})
-
-	causal := Causal[*DotMap[string, *DotMap[string, *DotSet]]]{
-		Store:   outerMap,
-		Context: ctx,
-	}
-
-	if err := c.Encode(&buf, causal); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Verify store
-	om, ok := got.Store.Get("hash-abc")
-	if !ok {
-		t.Fatal("missing hash-abc in decoded store")
-	}
-	ids, ok := om.Get("file-a")
-	if !ok || !ids.Has(Dot{ID: "w1", Seq: 1}) {
-		t.Error("inner dot missing after round-trip")
-	}
-	// Verify context
-	if !got.Context.Has(Dot{ID: "w1", Seq: 1}) {
-		t.Error("context dot missing")
-	}
 }

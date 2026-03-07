@@ -2,89 +2,77 @@ package ewflag
 
 import (
 	"testing"
+
+	qt "github.com/frankban/quicktest"
 )
 
 func TestNewDisabled(t *testing.T) {
+	c := qt.New(t)
 	f := New("a")
-	if f.Value() {
-		t.Fatal("new flag is enabled, want disabled")
-	}
+	c.Assert(f.Value(), qt.IsFalse)
 }
 
 func TestEnableDisable(t *testing.T) {
+	c := qt.New(t)
 	f := New("a")
 	f.Enable()
-	if !f.Value() {
-		t.Fatal("flag disabled after Enable")
-	}
+	c.Assert(f.Value(), qt.IsTrue)
 	f.Disable()
-	if f.Value() {
-		t.Fatal("flag enabled after Disable")
-	}
+	c.Assert(f.Value(), qt.IsFalse)
 }
 
 func TestReEnable(t *testing.T) {
+	c := qt.New(t)
 	f := New("a")
 	f.Enable()
 	f.Disable()
 	f.Enable()
-	if !f.Value() {
-		t.Fatal("flag disabled after re-Enable")
-	}
+	c.Assert(f.Value(), qt.IsTrue)
 }
 
 func TestEnableReturnsValidDelta(t *testing.T) {
+	c := qt.New(t)
 	f := New("a")
 	delta := f.Enable()
-	if !delta.Value() {
-		t.Fatal("enable delta is disabled")
-	}
+	c.Assert(delta.Value(), qt.IsTrue)
 }
 
 func TestDisableReturnsValidDelta(t *testing.T) {
+	c := qt.New(t)
 	f := New("a")
 	f.Enable()
 	delta := f.Disable()
-	if delta.Value() {
-		t.Fatal("disable delta is enabled")
-	}
+	c.Assert(delta.Value(), qt.IsFalse)
 }
 
 func TestDisableWhenAlreadyDisabled(t *testing.T) {
+	c := qt.New(t)
 	f := New("a")
 	f.Disable() // should not panic
-	if f.Value() {
-		t.Fatal("flag enabled after Disable on already-disabled flag")
-	}
+	c.Assert(f.Value(), qt.IsFalse)
 }
 
 // --- Enable-wins semantics ---
 
 func TestEnableWinsConcurrent(t *testing.T) {
-	// Two replicas start with the flag enabled (both have seen the same dot).
+	c := qt.New(t)
 	a := New("a")
 	enableDelta := a.Enable()
 	b := New("b")
-	b.Merge(enableDelta) // both see the same dot for "enabled"
+	b.Merge(enableDelta)
 
-	// Concurrent: a disables, b enables.
 	disableDelta := a.Disable()
 	reEnableDelta := b.Enable()
 
-	// Exchange deltas.
 	a.Merge(reEnableDelta)
 	b.Merge(disableDelta)
 
-	// Both should converge to enabled — enable wins over concurrent disable.
-	if !a.Value() {
-		t.Fatal("a: enable-wins failed, flag disabled")
-	}
-	if !b.Value() {
-		t.Fatal("b: enable-wins failed, flag disabled")
-	}
+	c.Assert(a.Value(), qt.IsTrue)
+	c.Assert(b.Value(), qt.IsTrue)
 }
 
 func TestConcurrentEnables(t *testing.T) {
+	c := qt.New(t)
 	a := New("a")
 	b := New("b")
 
@@ -94,17 +82,14 @@ func TestConcurrentEnables(t *testing.T) {
 	a.Merge(db)
 	b.Merge(da)
 
-	if !a.Value() {
-		t.Fatal("a: disabled after concurrent enables")
-	}
-	if !b.Value() {
-		t.Fatal("b: disabled after concurrent enables")
-	}
+	c.Assert(a.Value(), qt.IsTrue)
+	c.Assert(b.Value(), qt.IsTrue)
 }
 
 // --- Merge properties ---
 
 func TestMergeIdempotent(t *testing.T) {
+	c := qt.New(t)
 	a := New("a")
 	a.Enable()
 
@@ -114,16 +99,14 @@ func TestMergeIdempotent(t *testing.T) {
 	a.Merge(snapshot)
 	a.Merge(snapshot)
 
-	if !a.Value() {
-		t.Fatal("flag disabled after idempotent merge")
-	}
+	c.Assert(a.Value(), qt.IsTrue)
 }
 
 func TestMergeCommutative(t *testing.T) {
+	c := qt.New(t)
 	a := New("a")
 	b := New("b")
 	a.Enable()
-	// b stays disabled
 
 	ab := New("x")
 	ab.Merge(a)
@@ -133,12 +116,11 @@ func TestMergeCommutative(t *testing.T) {
 	ba.Merge(b)
 	ba.Merge(a)
 
-	if ab.Value() != ba.Value() {
-		t.Fatalf("merge not commutative: ab=%v, ba=%v", ab.Value(), ba.Value())
-	}
+	c.Assert(ab.Value(), qt.Equals, ba.Value())
 }
 
 func TestDeltaIncrementalEqualsFullMerge(t *testing.T) {
+	c := qt.New(t)
 	a := New("a")
 	d1 := a.Enable()
 	d2 := a.Disable()
@@ -152,12 +134,11 @@ func TestDeltaIncrementalEqualsFullMerge(t *testing.T) {
 	full := New("b")
 	full.Merge(a)
 
-	if incremental.Value() != full.Value() {
-		t.Fatalf("incremental=%v != full=%v", incremental.Value(), full.Value())
-	}
+	c.Assert(incremental.Value(), qt.Equals, full.Value())
 }
 
 func TestMergeDisableDelta(t *testing.T) {
+	c := qt.New(t)
 	a := New("a")
 	b := New("b")
 
@@ -167,33 +148,29 @@ func TestMergeDisableDelta(t *testing.T) {
 	disableDelta := a.Disable()
 	b.Merge(disableDelta)
 
-	if b.Value() {
-		t.Fatal("b still enabled after receiving disable delta")
-	}
+	c.Assert(b.Value(), qt.IsFalse)
 }
 
 // --- Three-replica convergence ---
 
 func TestThreeReplicaConvergence(t *testing.T) {
+	c := qt.New(t)
 	a := New("a")
 	b := New("b")
-	c := New("c")
+	x := New("c")
 
 	da := a.Enable()
 	// b stays disabled
-	dc := c.Enable()
+	dx := x.Enable()
 
 	a.Merge(b)
-	a.Merge(dc)
+	a.Merge(dx)
 	b.Merge(da)
-	b.Merge(dc)
-	c.Merge(da)
-	c.Merge(b)
+	b.Merge(dx)
+	x.Merge(da)
+	x.Merge(b)
 
-	if a.Value() != b.Value() || b.Value() != c.Value() {
-		t.Fatalf("not converged: a=%v, b=%v, c=%v", a.Value(), b.Value(), c.Value())
-	}
-	if !a.Value() {
-		t.Fatal("converged to disabled, want enabled (two of three enabled)")
-	}
+	c.Assert(a.Value(), qt.Equals, b.Value())
+	c.Assert(b.Value(), qt.Equals, x.Value())
+	c.Assert(a.Value(), qt.IsTrue)
 }

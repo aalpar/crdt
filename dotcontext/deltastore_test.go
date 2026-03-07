@@ -1,64 +1,58 @@
 package dotcontext
 
-import "testing"
+import (
+	"testing"
+
+	qt "github.com/frankban/quicktest"
+)
 
 func TestDeltaStoreNewEmpty(t *testing.T) {
+	c := qt.New(t)
 	s := NewDeltaStore[int]()
-	if s.Len() != 0 {
-		t.Errorf("Len() = %d, want 0", s.Len())
-	}
+	c.Assert(s.Len(), qt.Equals, 0)
 }
 
 func TestDeltaStoreAddGet(t *testing.T) {
+	c := qt.New(t)
 	s := NewDeltaStore[string]()
 	d := Dot{ID: "a", Seq: 1}
 
 	s.Add(d, "delta-1")
-
-	if s.Len() != 1 {
-		t.Errorf("Len() = %d, want 1", s.Len())
-	}
+	c.Assert(s.Len(), qt.Equals, 1)
 
 	got, ok := s.Get(d)
-	if !ok {
-		t.Fatal("Get returned !ok for stored dot")
-	}
-	if got != "delta-1" {
-		t.Errorf("Get() = %q, want %q", got, "delta-1")
-	}
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(got, qt.Equals, "delta-1")
 }
 
 func TestDeltaStoreGetMissing(t *testing.T) {
+	c := qt.New(t)
 	s := NewDeltaStore[string]()
 	_, ok := s.Get(Dot{ID: "x", Seq: 99})
-	if ok {
-		t.Error("Get returned ok for absent dot")
-	}
+	c.Assert(ok, qt.IsFalse)
 }
 
 func TestDeltaStoreRemove(t *testing.T) {
+	c := qt.New(t)
 	s := NewDeltaStore[string]()
 	d := Dot{ID: "a", Seq: 1}
 	s.Add(d, "delta-1")
 	s.Remove(d)
 
-	if s.Len() != 0 {
-		t.Errorf("Len() after Remove = %d, want 0", s.Len())
-	}
-	if _, ok := s.Get(d); ok {
-		t.Error("Get returned ok after Remove")
-	}
+	c.Assert(s.Len(), qt.Equals, 0)
+	_, ok := s.Get(d)
+	c.Assert(ok, qt.IsFalse)
 }
 
 func TestDeltaStoreRemoveAbsent(t *testing.T) {
+	c := qt.New(t)
 	s := NewDeltaStore[string]()
 	s.Remove(Dot{ID: "x", Seq: 1}) // should not panic
-	if s.Len() != 0 {
-		t.Errorf("Len() = %d, want 0", s.Len())
-	}
+	c.Assert(s.Len(), qt.Equals, 0)
 }
 
 func TestDeltaStoreFetchSingleRange(t *testing.T) {
+	c := qt.New(t)
 	s := NewDeltaStore[string]()
 	s.Add(Dot{ID: "a", Seq: 1}, "d1")
 	s.Add(Dot{ID: "a", Seq: 2}, "d2")
@@ -70,19 +64,13 @@ func TestDeltaStoreFetchSingleRange(t *testing.T) {
 	}
 	got := s.Fetch(missing)
 
-	// Should return a:2 and a:3. a:4 is not in store. a:1 and a:5 outside range.
-	if len(got) != 2 {
-		t.Fatalf("Fetch() returned %d deltas, want 2: %v", len(got), got)
-	}
-	if got[Dot{ID: "a", Seq: 2}] != "d2" {
-		t.Error("missing a:2")
-	}
-	if got[Dot{ID: "a", Seq: 3}] != "d3" {
-		t.Error("missing a:3")
-	}
+	c.Assert(len(got), qt.Equals, 2)
+	c.Assert(got[Dot{ID: "a", Seq: 2}], qt.Equals, "d2")
+	c.Assert(got[Dot{ID: "a", Seq: 3}], qt.Equals, "d3")
 }
 
 func TestDeltaStoreFetchMultiReplica(t *testing.T) {
+	c := qt.New(t)
 	s := NewDeltaStore[string]()
 	s.Add(Dot{ID: "a", Seq: 1}, "a1")
 	s.Add(Dot{ID: "a", Seq: 3}, "a3")
@@ -95,61 +83,42 @@ func TestDeltaStoreFetchMultiReplica(t *testing.T) {
 	}
 	got := s.Fetch(missing)
 
-	if len(got) != 3 {
-		t.Fatalf("Fetch() returned %d deltas, want 3: %v", len(got), got)
-	}
-	if got[Dot{ID: "a", Seq: 1}] != "a1" {
-		t.Error("missing a:1")
-	}
-	if got[Dot{ID: "a", Seq: 3}] != "a3" {
-		t.Error("missing a:3")
-	}
-	if got[Dot{ID: "b", Seq: 2}] != "b2" {
-		t.Error("missing b:2")
-	}
-	// c:1 should NOT be in result — c not in missing
-	if _, ok := got[Dot{ID: "c", Seq: 1}]; ok {
-		t.Error("c:1 should not be returned")
-	}
+	c.Assert(len(got), qt.Equals, 3)
+	c.Assert(got[Dot{ID: "a", Seq: 1}], qt.Equals, "a1")
+	c.Assert(got[Dot{ID: "a", Seq: 3}], qt.Equals, "a3")
+	c.Assert(got[Dot{ID: "b", Seq: 2}], qt.Equals, "b2")
+	_, ok := got[Dot{ID: "c", Seq: 1}]
+	c.Assert(ok, qt.IsFalse)
 }
 
 func TestDeltaStoreFetchEmpty(t *testing.T) {
+	c := qt.New(t)
 	s := NewDeltaStore[string]()
 	s.Add(Dot{ID: "a", Seq: 1}, "a1")
 
-	got := s.Fetch(nil)
-	if got != nil {
-		t.Errorf("Fetch(nil) = %v, want nil", got)
-	}
-
-	got = s.Fetch(map[ReplicaID][]SeqRange{})
-	if got != nil {
-		t.Errorf("Fetch(empty) = %v, want nil", got)
-	}
+	c.Assert(s.Fetch(nil), qt.IsNil)
+	c.Assert(s.Fetch(map[ReplicaID][]SeqRange{}), qt.IsNil)
 }
 
 func TestDeltaStoreFetchNoMatches(t *testing.T) {
+	c := qt.New(t)
 	s := NewDeltaStore[string]()
 	s.Add(Dot{ID: "a", Seq: 1}, "a1")
 
 	missing := map[ReplicaID][]SeqRange{
 		"b": {{Lo: 1, Hi: 10}},
 	}
-	got := s.Fetch(missing)
-	if got != nil {
-		t.Errorf("Fetch with no matches = %v, want nil", got)
-	}
+	c.Assert(s.Fetch(missing), qt.IsNil)
 }
 
 func TestDotsEmpty(t *testing.T) {
+	c := qt.New(t)
 	store := NewDeltaStore[int]()
-	dots := store.Dots()
-	if len(dots) != 0 {
-		t.Errorf("Dots() = %v, want empty", dots)
-	}
+	c.Assert(store.Dots(), qt.HasLen, 0)
 }
 
 func TestDots(t *testing.T) {
+	c := qt.New(t)
 	store := NewDeltaStore[int]()
 	d1 := Dot{ID: "a", Seq: 1}
 	d2 := Dot{ID: "a", Seq: 2}
@@ -159,17 +128,13 @@ func TestDots(t *testing.T) {
 	store.Add(d3, 30)
 
 	dots := store.Dots()
-	if len(dots) != 3 {
-		t.Fatalf("len(Dots()) = %d, want 3", len(dots))
-	}
+	c.Assert(dots, qt.HasLen, 3)
 
 	have := make(map[Dot]bool)
 	for _, d := range dots {
 		have[d] = true
 	}
 	for _, want := range []Dot{d1, d2, d3} {
-		if !have[want] {
-			t.Errorf("Dots() missing %v", want)
-		}
+		c.Assert(have[want], qt.IsTrue, qt.Commentf("missing %v", want))
 	}
 }
