@@ -12,6 +12,7 @@ import (
 	"github.com/aalpar/crdt/dotcontext"
 	"github.com/aalpar/crdt/ewflag"
 	"github.com/aalpar/crdt/lwwregister"
+	"github.com/aalpar/crdt/mvregister"
 	"github.com/aalpar/crdt/ormap"
 	"github.com/aalpar/crdt/pncounter"
 )
@@ -869,4 +870,77 @@ func TestE2EPNCounterDecrementAcrossWire(t *testing.T) {
 	// Both converge to 7 (10 + (-3)).
 	c.Assert(alice.Value(), qt.Equals, int64(7))
 	c.Assert(bob.Value(), qt.Equals, int64(7))
+}
+
+// --- MVRegister codec ---
+
+type mvrValueStringCodec struct{}
+
+func (mvrValueStringCodec) Encode(w io.Writer, v mvregister.Value[string]) error {
+	return (dotcontext.StringCodec{}).Encode(w, v.V)
+}
+
+func (mvrValueStringCodec) Decode(r io.Reader) (mvregister.Value[string], error) {
+	s, err := (dotcontext.StringCodec{}).Decode(r)
+	return mvregister.Value[string]{V: s}, err
+}
+
+type mvrDeltaCodec struct {
+	inner dotcontext.CausalCodec[*dotcontext.DotFun[mvregister.Value[string]]]
+}
+
+func newMVRDeltaCodec() mvrDeltaCodec {
+	return mvrDeltaCodec{
+		inner: dotcontext.CausalCodec[*dotcontext.DotFun[mvregister.Value[string]]]{
+			StoreCodec: dotcontext.DotFunCodec[mvregister.Value[string]]{
+				ValueCodec: mvrValueStringCodec{},
+			},
+		},
+	}
+}
+
+func (c mvrDeltaCodec) Encode(w io.Writer, v dotcontext.Causal[*dotcontext.DotFun[mvregister.Value[string]]]) error {
+	return c.inner.Encode(w, v)
+}
+
+func (c mvrDeltaCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.DotFun[mvregister.Value[string]]], error) {
+	return c.inner.Decode(r)
+}
+
+// TestE2EMVRegisterAcrossWire verifies that MVRegister deltas
+// (DotFun-based, like LWWRegister but with multi-value semantics)
+// survive encode→decode→merge and that concurrent writes produce
+// multiple values rather than picking a winner.
+func TestE2EMVRegisterAcrossWire(t *testing.T) {
+	c := qt.New(t)
+	codec := newMVRDeltaCodec()
+
+	alice := mvregister.New[string]("alice")
+	bob := mvregister.New[string]("bob")
+
+	// Concurrent writes.
+	aliceDelta := alice.Write("from-alice")
+	bobDelta := bob.Write("from-bob")
+
+	// Encode both deltas.
+	var bufA, bufB bytes.Buffer
+	c.Assert(codec.Encode(&bufA, aliceDelta.State()), qt.IsNil)
+	c.Assert(codec.Encode(&bufB, bobDelta.State()), qt.IsNil)
+
+	// Cross-merge.
+	decodedA, err := codec.Decode(&bufA)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(mvregister.FromCausal[string](decodedA))
+
+	decodedB, err := codec.Decode(&bufB)
+	c.Assert(err, qt.IsNil)
+	alice.Merge(mvregister.FromCausal[string](decodedB))
+
+	// Both converge to both values (no winner — all preserved).
+	expected := []string{"from-alice", "from-bob"}
+	for _, r := range []*mvregister.MVRegister[string]{alice, bob} {
+		vals := r.Values()
+		sort.Strings(vals)
+		c.Assert(vals, qt.DeepEquals, expected)
+	}
 }
