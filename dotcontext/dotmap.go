@@ -51,6 +51,16 @@ func (p *DotMap[K, V]) Keys() []K {
 	return keys
 }
 
+// Clone returns a shallow copy of the DotMap. Keys are copied but nested
+// DotStore values are shared (same behavior as DotFun.Clone).
+func (p *DotMap[K, V]) Clone() *DotMap[K, V] {
+	dm := &DotMap[K, V]{entries: make(map[K]V, len(p.entries))}
+	for k, v := range p.entries {
+		dm.entries[k] = v
+	}
+	return dm
+}
+
 // Dots returns the union of dots across all nested stores (DotStore implementation).
 func (p *DotMap[K, V]) Dots() *DotSet {
 	ds := NewDotSet()

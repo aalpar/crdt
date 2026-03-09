@@ -10,7 +10,9 @@ import (
 
 	"github.com/aalpar/crdt/awset"
 	"github.com/aalpar/crdt/dotcontext"
+	"github.com/aalpar/crdt/ewflag"
 	"github.com/aalpar/crdt/lwwregister"
+	"github.com/aalpar/crdt/ormap"
 	"github.com/aalpar/crdt/pncounter"
 )
 
@@ -575,4 +577,251 @@ func TestE2EPNCounterAcrossWire(t *testing.T) {
 	// Both converge to 8 (sum of contributions).
 	c.Assert(alice.Value(), qt.Equals, int64(8))
 	c.Assert(bob.Value(), qt.Equals, int64(8))
+}
+
+// --- EWFlag codec ---
+
+type ewflagDeltaCodec struct {
+	inner dotcontext.CausalCodec[*dotcontext.DotSet]
+}
+
+func newEWFlagDeltaCodec() ewflagDeltaCodec {
+	return ewflagDeltaCodec{
+		inner: dotcontext.CausalCodec[*dotcontext.DotSet]{
+			StoreCodec: dotcontext.DotSetCodec{},
+		},
+	}
+}
+
+func (c ewflagDeltaCodec) Encode(w io.Writer, v dotcontext.Causal[*dotcontext.DotSet]) error {
+	return c.inner.Encode(w, v)
+}
+
+func (c ewflagDeltaCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.DotSet], error) {
+	return c.inner.Decode(r)
+}
+
+// TestE2EEWFlagAcrossWire verifies that EWFlag deltas (DotSet-based)
+// survive encode→decode→merge and that enable-wins conflict resolution
+// works across the wire.
+func TestE2EEWFlagAcrossWire(t *testing.T) {
+	c := qt.New(t)
+	codec := newEWFlagDeltaCodec()
+
+	alice := ewflag.New("alice")
+	bob := ewflag.New("bob")
+
+	// Both start enabled by syncing alice's enable.
+	enableDelta := alice.Enable()
+	var buf bytes.Buffer
+	c.Assert(codec.Encode(&buf, enableDelta.State()), qt.IsNil)
+	decoded, err := codec.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(ewflag.FromCausal(decoded))
+	c.Assert(alice.Value(), qt.IsTrue)
+	c.Assert(bob.Value(), qt.IsTrue)
+
+	// Concurrent: alice re-enables (new dot), bob disables.
+	aliceDelta := alice.Enable()
+	bobDelta := bob.Disable()
+
+	// Encode both deltas.
+	var bufA, bufB bytes.Buffer
+	c.Assert(codec.Encode(&bufA, aliceDelta.State()), qt.IsNil)
+	c.Assert(codec.Encode(&bufB, bobDelta.State()), qt.IsNil)
+
+	// Cross-merge.
+	decodedA, err := codec.Decode(&bufA)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(ewflag.FromCausal(decodedA))
+
+	decodedB, err := codec.Decode(&bufB)
+	c.Assert(err, qt.IsNil)
+	alice.Merge(ewflag.FromCausal(decodedB))
+
+	// Enable wins: both should be enabled.
+	c.Assert(alice.Value(), qt.IsTrue, qt.Commentf("enable-wins: flag must be true"))
+	c.Assert(bob.Value(), qt.IsTrue, qt.Commentf("enable-wins: flag must be true"))
+}
+
+// TestE2EORMapAddWinsAcrossWire verifies that ORMap deltas survive
+// encode→decode→merge and that concurrent add + remove of the same
+// key resolves to add-wins across the wire.
+//
+// Uses ORMap[string, *DotSet] — structurally the same wire format
+// as AWSet, but exercising ORMap's recursive JoinDotMap merge path.
+func TestE2EORMapAddWinsAcrossWire(t *testing.T) {
+	c := qt.New(t)
+	// ORMap[string, *DotSet] shares AWSet's wire format.
+	codec := newAWSetDeltaCodec()
+
+	newMap := func(id string) *ormap.ORMap[string, *dotcontext.DotSet] {
+		return ormap.New[string, *dotcontext.DotSet](
+			dotcontext.ReplicaID(id),
+			dotcontext.JoinDotSet,
+			dotcontext.NewDotSet,
+		)
+	}
+
+	applyAdd := func(m *ormap.ORMap[string, *dotcontext.DotSet], key string) *ormap.ORMap[string, *dotcontext.DotSet] {
+		return m.Apply(key, func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotSet, delta *dotcontext.DotSet) {
+			d := ctx.Next(id)
+			v.Add(d)
+			delta.Add(d)
+		})
+	}
+
+	alice := newMap("alice")
+	bob := newMap("bob")
+
+	// Alice adds key "x". Sync to bob.
+	aliceDelta := applyAdd(alice, "x")
+	var buf bytes.Buffer
+	c.Assert(codec.Encode(&buf, aliceDelta.State()), qt.IsNil)
+	decoded, err := codec.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(ormap.FromCausal(decoded, dotcontext.JoinDotSet, dotcontext.NewDotSet))
+	c.Assert(alice.Has("x"), qt.IsTrue)
+	c.Assert(bob.Has("x"), qt.IsTrue)
+
+	// Concurrent: alice adds to "x" again (new dot), bob removes "x".
+	aliceDelta2 := applyAdd(alice, "x")
+	bobDelta := bob.Remove("x")
+
+	// Encode both.
+	var bufA, bufB bytes.Buffer
+	c.Assert(codec.Encode(&bufA, aliceDelta2.State()), qt.IsNil)
+	c.Assert(codec.Encode(&bufB, bobDelta.State()), qt.IsNil)
+
+	// Cross-merge.
+	decodedA, err := codec.Decode(&bufA)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(ormap.FromCausal(decodedA, dotcontext.JoinDotSet, dotcontext.NewDotSet))
+
+	decodedB, err := codec.Decode(&bufB)
+	c.Assert(err, qt.IsNil)
+	alice.Merge(ormap.FromCausal(decodedB, dotcontext.JoinDotSet, dotcontext.NewDotSet))
+
+	// Add wins: "x" must survive on both replicas.
+	c.Assert(alice.Has("x"), qt.IsTrue, qt.Commentf("add-wins: x must survive"))
+	c.Assert(bob.Has("x"), qt.IsTrue, qt.Commentf("add-wins: x must survive"))
+}
+
+// TestE2EORMapNestedMergeAcrossWire verifies that concurrent Apply
+// operations on the same key recursively merge nested values
+// across the wire — both dots survive under the same key.
+func TestE2EORMapNestedMergeAcrossWire(t *testing.T) {
+	c := qt.New(t)
+	codec := newAWSetDeltaCodec()
+
+	newMap := func(id string) *ormap.ORMap[string, *dotcontext.DotSet] {
+		return ormap.New[string, *dotcontext.DotSet](
+			dotcontext.ReplicaID(id),
+			dotcontext.JoinDotSet,
+			dotcontext.NewDotSet,
+		)
+	}
+
+	applyAdd := func(m *ormap.ORMap[string, *dotcontext.DotSet], key string) *ormap.ORMap[string, *dotcontext.DotSet] {
+		return m.Apply(key, func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotSet, delta *dotcontext.DotSet) {
+			d := ctx.Next(id)
+			v.Add(d)
+			delta.Add(d)
+		})
+	}
+
+	alice := newMap("alice")
+	bob := newMap("bob")
+
+	// Concurrent: both add to key "x" independently.
+	aliceDelta := applyAdd(alice, "x")
+	bobDelta := applyAdd(bob, "x")
+
+	// Encode both.
+	var bufA, bufB bytes.Buffer
+	c.Assert(codec.Encode(&bufA, aliceDelta.State()), qt.IsNil)
+	c.Assert(codec.Encode(&bufB, bobDelta.State()), qt.IsNil)
+
+	// Cross-merge.
+	decodedA, err := codec.Decode(&bufA)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(ormap.FromCausal(decodedA, dotcontext.JoinDotSet, dotcontext.NewDotSet))
+
+	decodedB, err := codec.Decode(&bufB)
+	c.Assert(err, qt.IsNil)
+	alice.Merge(ormap.FromCausal(decodedB, dotcontext.JoinDotSet, dotcontext.NewDotSet))
+
+	// Both dots survive under key "x" (recursive DotSet join).
+	aliceV, aliceOk := alice.Get("x")
+	bobV, bobOk := bob.Get("x")
+	c.Assert(aliceOk, qt.IsTrue)
+	c.Assert(bobOk, qt.IsTrue)
+	c.Assert(aliceV.Len(), qt.Equals, 2, qt.Commentf("both dots must survive"))
+	c.Assert(bobV.Len(), qt.Equals, 2, qt.Commentf("both dots must survive"))
+}
+
+// TestE2ELWWTiebreakAcrossWire verifies that same-timestamp tiebreak
+// (lexicographic on replica ID) works across the wire.
+func TestE2ELWWTiebreakAcrossWire(t *testing.T) {
+	c := qt.New(t)
+	codec := newLWWDeltaCodec()
+
+	alice := lwwregister.New[string]("alice")
+	bob := lwwregister.New[string]("bob")
+
+	// Same timestamp: tiebreak on replica ID ("bob" > "alice").
+	aliceDelta := alice.Set("from-alice", 100)
+	bobDelta := bob.Set("from-bob", 100)
+
+	// Encode both deltas.
+	var bufA, bufB bytes.Buffer
+	c.Assert(codec.Encode(&bufA, aliceDelta.State()), qt.IsNil)
+	c.Assert(codec.Encode(&bufB, bobDelta.State()), qt.IsNil)
+
+	// Cross-merge.
+	decodedA, err := codec.Decode(&bufA)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(lwwregister.FromCausal[string](decodedA))
+
+	decodedB, err := codec.Decode(&bufB)
+	c.Assert(err, qt.IsNil)
+	alice.Merge(lwwregister.FromCausal[string](decodedB))
+
+	// Both converge to "from-bob" (lexicographic tiebreak: "bob" > "alice").
+	aliceVal, _, _ := alice.Value()
+	bobVal, _, _ := bob.Value()
+	c.Assert(aliceVal, qt.Equals, "from-bob", qt.Commentf("tiebreak: bob > alice"))
+	c.Assert(bobVal, qt.Equals, "from-bob", qt.Commentf("tiebreak: bob > alice"))
+}
+
+// TestE2EPNCounterDecrementAcrossWire verifies that negative contributions
+// (decrements) survive encode→decode→merge and produce the correct sum.
+func TestE2EPNCounterDecrementAcrossWire(t *testing.T) {
+	c := qt.New(t)
+	codec := newCounterDeltaCodec()
+
+	alice := pncounter.New("alice")
+	bob := pncounter.New("bob")
+
+	// Concurrent: alice +10, bob -3.
+	aliceDelta := alice.Increment(10)
+	bobDelta := bob.Decrement(3)
+
+	// Encode both deltas.
+	var bufA, bufB bytes.Buffer
+	c.Assert(codec.Encode(&bufA, aliceDelta.State()), qt.IsNil)
+	c.Assert(codec.Encode(&bufB, bobDelta.State()), qt.IsNil)
+
+	// Cross-merge.
+	decodedA, err := codec.Decode(&bufA)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(pncounter.FromCausal(decodedA))
+
+	decodedB, err := codec.Decode(&bufB)
+	c.Assert(err, qt.IsNil)
+	alice.Merge(pncounter.FromCausal(decodedB))
+
+	// Both converge to 7 (10 + (-3)).
+	c.Assert(alice.Value(), qt.Equals, int64(7))
+	c.Assert(bob.Value(), qt.Equals, int64(7))
 }
