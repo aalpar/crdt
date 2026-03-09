@@ -57,26 +57,33 @@ Each composes dotcontext types. Mutators return deltas for replication.
 - `CausalContext` outliers are `map[ReplicaID][]uint64` (per-replica sorted slices), not `map[Dot]struct{}`
 - `math/big` is not used here (that's the shamir project); this project uses stdlib maps throughout
 - `Compact()` removes outliers at or below the version vector frontier, not just contiguous ones
+- `Merge()` uses a sorted-merge pass for outliers (O(m+n)), not per-element insert
+- Decode errors are typed (`*DecodeLimitError`) — use `errors.As` to distinguish malformed input from I/O errors
 
 ## Package Map
 
 | Package | Key Types | Files |
 |---------|-----------|-------|
-| `dotcontext/` | Dot, CausalContext, DotSet, DotFun, DotMap, Causal | 11 source + 10 test |
-| `awset/` | AWSet | 2 source + 2 test |
-| `rwset/` | RWSet, Presence | 2 source + 1 test |
-| `lwwregister/` | LWWRegister | 2 source + 1 test |
-| `pncounter/` | Counter | 2 source + 1 test |
-| `gcounter/` | Counter, GValue | 2 source + 1 test |
-| `ormap/` | ORMap | 2 source + 1 test |
-| `ewflag/` | EWFlag | 2 source + 1 test |
-| `dwflag/` | DWFlag | 2 source + 1 test |
-| `mvregister/` | MVRegister | 2 source + 1 test |
+| `dotcontext/` | Dot, CausalContext, DotSet, DotFun, DotMap, Causal, DecodeLimitError | 11 source + 10 test |
+| `crdttest/` | Harness[T] | 1 source (test-only shared property tests) |
+| `awset/` | AWSet | 2 source + 3 test |
+| `rwset/` | RWSet, Presence | 2 source + 2 test |
+| `lwwregister/` | LWWRegister | 2 source + 2 test |
+| `pncounter/` | Counter | 2 source + 2 test |
+| `gcounter/` | Counter, GValue | 2 source + 2 test |
+| `ormap/` | ORMap | 2 source + 2 test |
+| `ewflag/` | EWFlag | 2 source + 2 test |
+| `dwflag/` | DWFlag | 2 source + 2 test |
+| `mvregister/` | MVRegister | 2 source + 2 test |
 | `replication/` | PeerTracker, GC, WriteDeltaBatch | 4 source + 4 test |
+
+### Shared Test Harness: `crdttest/`
+
+`crdttest.Harness[T]` validates semilattice properties generically. Each CRDT provides a `shared_test.go` configuring `New`, `Merge`, `Equal`, and `Ops` (≥5 mutation functions). The harness runs: idempotent/commutative/associative merge, incremental vs full delta propagation, delta-delta merge, empty merge, and 3/5-replica convergence. CRDT-specific tests (conflict resolution, delta structure, round-trip) remain per-package.
 
 ## Testing
 
-- `go test ./...` — 644 tests across all packages
+- `go test ./...` — 661 tests across all packages
 - `go test -race ./...` — race detector
 - `go test -fuzz=FuzzJoinDotSetSemilattice ./dotcontext/` — fuzz semilattice properties
 - `make benchmark` — benchmarks across all packages
