@@ -1,7 +1,9 @@
-GO       ?= go
-GOFLAGS  ?=
-PACKAGES  = ./...
-VERSION  := $(shell cat VERSION 2>/dev/null || echo v0.0.0)
+GO        ?= go
+GOFLAGS   ?=
+PACKAGES   = ./...
+PROF_PKG  ?= ./dotcontext/
+PROF_DIR  ?= profiles
+VERSION   := $(shell cat VERSION 2>/dev/null || echo v0.0.0)
 
 .PHONY: all
 all: build test vet
@@ -22,9 +24,21 @@ test-v:
 test-race:
 	$(GO) test $(GOFLAGS) -race $(PACKAGES)
 
-.PHONY: bench
-bench:
+.PHONY: benchmark
+benchmark:
 	$(GO) test $(GOFLAGS) -bench=. -benchmem $(PACKAGES)
+
+.PHONY: profile
+profile:
+	@mkdir -p $(PROF_DIR)
+	$(GO) test $(GOFLAGS) -bench=. -benchmem \
+		-cpuprofile=$(PROF_DIR)/cpu.prof \
+		-memprofile=$(PROF_DIR)/mem.prof \
+		$(PROF_PKG)
+	@echo ""
+	@echo "Profiles written to $(PROF_DIR)/"
+	@echo "  go tool pprof -http=:8080 $(PROF_DIR)/cpu.prof"
+	@echo "  go tool pprof -http=:8080 $(PROF_DIR)/mem.prof"
 
 .PHONY: fuzz
 fuzz:

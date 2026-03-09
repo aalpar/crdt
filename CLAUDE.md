@@ -67,7 +67,8 @@ Each composes dotcontext types. Mutators return deltas for replication.
 - `go test ./...` — 524 tests across all packages
 - `go test -race ./...` — race detector
 - `go test -fuzz=FuzzJoinDotSetSemilattice ./dotcontext/` — fuzz semilattice properties
-- `go test -bench=. -benchmem ./dotcontext/` — benchmarks
+- `make benchmark` — benchmarks across all packages
+- `make profile` — CPU + memory profiles to `profiles/` (default: `dotcontext/`, override: `PROF_PKG=./awset/ make profile`)
 - **After changes**: `make lint && make && make test`
 
 ## Document Naming

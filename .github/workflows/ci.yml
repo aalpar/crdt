@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -33,3 +36,30 @@ jobs:
 
       - name: Test (race detector)
         run: make test-race
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: Run benchmarks
+        run: go test -run='^$' -bench=. -benchmem -count=5 ./... | tee bench-new.txt
+
+      - name: Compare to baseline
+        run: |
+          if [ -f benchmarks/baseline.txt ]; then
+            echo "## Benchmark Comparison" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            benchstat benchmarks/baseline.txt bench-new.txt | tee -a "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No baseline found, skipping comparison."
+          fi
+
+      - name: Update baseline
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          mkdir -p benchmarks
+          cp bench-new.txt benchmarks/baseline.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add benchmarks/baseline.txt
+          git diff --cached --quiet || (git commit -m "ci: update benchmark baseline" && git push)
