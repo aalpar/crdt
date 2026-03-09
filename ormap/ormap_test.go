@@ -618,32 +618,193 @@ func newCounterMap(id dotcontext.ReplicaID) *ORMap[string, *dotcontext.DotFun[co
 
 func TestDotFunValues(t *testing.T) {
 	c := qt.New(t)
-	a := newCounterMap("a")
-	b := newCounterMap("b")
 
-	da := a.Apply("hits", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
-		d := ctx.Next(id)
-		v.Set(d, counterValue{n: 5})
-		delta.Set(d, counterValue{n: 5})
+	c.Run("BasicApplyMerge", func(c *qt.C) {
+		a := newCounterMap("a")
+		b := newCounterMap("b")
+
+		da := a.Apply("hits", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
+			d := ctx.Next(id)
+			v.Set(d, counterValue{n: 5})
+			delta.Set(d, counterValue{n: 5})
+		})
+		b.Merge(da)
+
+		db := b.Apply("hits", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
+			d := ctx.Next(id)
+			v.Set(d, counterValue{n: 3})
+			delta.Set(d, counterValue{n: 3})
+		})
+		a.Merge(db)
+
+		for _, m := range []*ORMap[string, *dotcontext.DotFun[counterValue]]{a, b} {
+			v, ok := m.Get("hits")
+			c.Assert(ok, qt.IsTrue)
+			c.Assert(v.Len(), qt.Equals, 2)
+			var total int64
+			v.Range(func(_ dotcontext.Dot, cv counterValue) bool {
+				total += cv.n
+				return true
+			})
+			c.Assert(total, qt.Equals, int64(8))
+		}
 	})
-	b.Merge(da)
 
-	db := b.Apply("hits", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
-		d := ctx.Next(id)
-		v.Set(d, counterValue{n: 3})
-		delta.Set(d, counterValue{n: 3})
+	c.Run("ConcurrentApplySameKey", func(c *qt.C) {
+		// Two replicas concurrently apply to the same key with no
+		// prior sync. Both dots should survive after merge (disjoint).
+		a := newCounterMap("a")
+		b := newCounterMap("b")
+
+		da := a.Apply("score", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
+			d := ctx.Next(id)
+			v.Set(d, counterValue{n: 10})
+			delta.Set(d, counterValue{n: 10})
+		})
+
+		db := b.Apply("score", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
+			d := ctx.Next(id)
+			v.Set(d, counterValue{n: 20})
+			delta.Set(d, counterValue{n: 20})
+		})
+
+		a.Merge(db)
+		b.Merge(da)
+
+		for _, m := range []*ORMap[string, *dotcontext.DotFun[counterValue]]{a, b} {
+			v, ok := m.Get("score")
+			c.Assert(ok, qt.IsTrue)
+			c.Assert(v.Len(), qt.Equals, 2)
+			var total int64
+			v.Range(func(_ dotcontext.Dot, cv counterValue) bool {
+				total += cv.n
+				return true
+			})
+			c.Assert(total, qt.Equals, int64(30))
+		}
 	})
-	a.Merge(db)
 
-	for _, m := range []*ORMap[string, *dotcontext.DotFun[counterValue]]{a, b} {
-		v, ok := m.Get("hits")
+	c.Run("SupersedeOwnDot", func(c *qt.C) {
+		// A replica increments, then increments again (superseding its
+		// own dot). After merge, only the latest dot per replica remains.
+		a := newCounterMap("a")
+		b := newCounterMap("b")
+
+		d1 := a.Apply("counter", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
+			d := ctx.Next(id)
+			v.Set(d, counterValue{n: 1})
+			delta.Set(d, counterValue{n: 1})
+		})
+		b.Merge(d1)
+
+		// a supersedes: remove old dot, add new one.
+		d2 := a.Apply("counter", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
+			// Remove all existing dots from v.
+			var old []dotcontext.Dot
+			v.Range(func(d dotcontext.Dot, _ counterValue) bool {
+				if d.ID == id {
+					old = append(old, d)
+				}
+				return true
+			})
+			for _, d := range old {
+				v.Remove(d)
+			}
+			d := ctx.Next(id)
+			v.Set(d, counterValue{n: 5})
+			delta.Set(d, counterValue{n: 5})
+		})
+		b.Merge(d2)
+
+		// b should see only one dot for "counter" from replica a (the new one).
+		v, ok := b.Get("counter")
 		c.Assert(ok, qt.IsTrue)
-		c.Assert(v.Len(), qt.Equals, 2)
+		c.Assert(v.Len(), qt.Equals, 1)
 		var total int64
 		v.Range(func(_ dotcontext.Dot, cv counterValue) bool {
 			total += cv.n
 			return true
 		})
-		c.Assert(total, qt.Equals, int64(8))
-	}
+		c.Assert(total, qt.Equals, int64(5))
+	})
+
+	c.Run("ConcurrentApplyAndRemove", func(c *qt.C) {
+		// a applies to key "k", b removes key "k" concurrently.
+		// Apply wins (add-wins key semantics).
+		a := newCounterMap("a")
+		b := newCounterMap("b")
+
+		// Both add key "k".
+		init := a.Apply("k", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
+			d := ctx.Next(id)
+			v.Set(d, counterValue{n: 1})
+			delta.Set(d, counterValue{n: 1})
+		})
+		b.Merge(init)
+
+		// a concurrently applies new value.
+		da := a.Apply("k", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
+			d := ctx.Next(id)
+			v.Set(d, counterValue{n: 42})
+			delta.Set(d, counterValue{n: 42})
+		})
+
+		// b concurrently removes.
+		db := b.Remove("k")
+
+		// Merge both directions.
+		a.Merge(db)
+		b.Merge(da)
+
+		// a's new dot survives (unseen by b's remove context).
+		for _, m := range []*ORMap[string, *dotcontext.DotFun[counterValue]]{a, b} {
+			c.Assert(m.Has("k"), qt.IsTrue)
+			v, _ := m.Get("k")
+			// Only a's new dot survives (the init dot was observed by both
+			// and removed by b). a's second apply added a new dot.
+			c.Assert(v.Len(), qt.Equals, 1)
+		}
+	})
+
+	c.Run("ThreeReplicaConvergence", func(c *qt.C) {
+		a := newCounterMap("a")
+		b := newCounterMap("b")
+		x := newCounterMap("c")
+
+		da := a.Apply("q", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
+			d := ctx.Next(id)
+			v.Set(d, counterValue{n: 10})
+			delta.Set(d, counterValue{n: 10})
+		})
+		db := b.Apply("q", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
+			d := ctx.Next(id)
+			v.Set(d, counterValue{n: 20})
+			delta.Set(d, counterValue{n: 20})
+		})
+		dx := x.Apply("q", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotFun[counterValue], delta *dotcontext.DotFun[counterValue]) {
+			d := ctx.Next(id)
+			v.Set(d, counterValue{n: 30})
+			delta.Set(d, counterValue{n: 30})
+		})
+
+		// Full mesh merge.
+		a.Merge(db)
+		a.Merge(dx)
+		b.Merge(da)
+		b.Merge(dx)
+		x.Merge(da)
+		x.Merge(db)
+
+		for _, m := range []*ORMap[string, *dotcontext.DotFun[counterValue]]{a, b, x} {
+			v, ok := m.Get("q")
+			c.Assert(ok, qt.IsTrue)
+			c.Assert(v.Len(), qt.Equals, 3) // one dot per replica
+			var total int64
+			v.Range(func(_ dotcontext.Dot, cv counterValue) bool {
+				total += cv.n
+				return true
+			})
+			c.Assert(total, qt.Equals, int64(60))
+		}
+	})
 }

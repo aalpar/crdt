@@ -311,6 +311,34 @@ func TestDeltaPropagation(t *testing.T) {
 	})
 }
 
+func TestMergeWithEmpty(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("IntoEmpty", func(c *qt.C) {
+		a := New[string]("a")
+		a.Add("x")
+		a.Add("y")
+
+		b := New[string]("b")
+		b.Merge(a)
+		c.Assert(b.Len(), qt.Equals, 2)
+		c.Assert(b.Has("x"), qt.IsTrue)
+		c.Assert(b.Has("y"), qt.IsTrue)
+	})
+
+	c.Run("EmptyIntoPopulated", func(c *qt.C) {
+		a := New[string]("a")
+		a.Add("x")
+		a.Add("y")
+
+		empty := New[string]("b")
+		a.Merge(empty)
+		c.Assert(a.Len(), qt.Equals, 2)
+		c.Assert(a.Has("x"), qt.IsTrue)
+		c.Assert(a.Has("y"), qt.IsTrue)
+	})
+}
+
 func TestStateRoundTrip(t *testing.T) {
 	c := qt.New(t)
 

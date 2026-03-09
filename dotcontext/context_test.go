@@ -128,6 +128,33 @@ func TestCausalContextCompact(t *testing.T) {
 		c.Assert(cc.Max("a"), qt.Equals, uint64(2))
 	})
 
+	c.Run("RedundantOutlierBelowVV", func(c *qt.C) {
+		// Merge raises VV past an existing outlier, making it
+		// strictly redundant (d.Seq <= vv[d.ID], not contiguous).
+		cc := New()
+		cc.Add(Dot{ID: "a", Seq: 3}) // outlier (vv["a"]=0)
+		cc.Add(Dot{ID: "a", Seq: 5}) // outlier
+
+		other := New()
+		other.Next("a") // vv["a"]=1
+		other.Next("a") // vv["a"]=2
+		other.Next("a") // vv["a"]=3
+		other.Next("a") // vv["a"]=4
+
+		cc.Merge(other) // vv["a"]=4, outlier a:3 is now below VV
+		cc.Compact()
+
+		// a:3 was redundant (below VV=4), should be pruned.
+		// a:5 was contiguous (VV+1=5), should be promoted → VV=5.
+		c.Assert(cc.Has(Dot{ID: "a", Seq: 3}), qt.IsTrue) // via VV
+		c.Assert(cc.Has(Dot{ID: "a", Seq: 5}), qt.IsTrue) // promoted
+		c.Assert(cc.Max("a"), qt.Equals, uint64(5))
+
+		// Next should continue from 6.
+		d := cc.Next("a")
+		c.Assert(d.Seq, qt.Equals, uint64(6))
+	})
+
 	c.Run("Idempotent", func(c *qt.C) {
 		cc := New()
 		cc.Next("a")

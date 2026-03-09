@@ -48,6 +48,19 @@ func TestDeltaStoreOperations(t *testing.T) {
 		s.Remove(Dot{ID: "x", Seq: 1}) // should not panic
 		c.Assert(s.Len(), qt.Equals, 0)
 	})
+
+	c.Run("AddOverwrite", func(c *qt.C) {
+		s := NewDeltaStore[string]()
+		d := Dot{ID: "a", Seq: 1}
+
+		s.Add(d, "first")
+		s.Add(d, "second") // same dot, different value
+
+		c.Assert(s.Len(), qt.Equals, 1)
+		got, ok := s.Get(d)
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(got, qt.Equals, "second")
+	})
 }
 
 func TestDeltaStoreFetch(t *testing.T) {

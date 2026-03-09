@@ -593,6 +593,74 @@ func TestDecodeRejectsOversizedLength(t *testing.T) {
 	_, err = (DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}).Decode(bytes.NewReader(buf.Bytes()))
 	c.Assert(err, qt.IsNotNil)
 	c.Assert(err.Error(), qt.Matches, `.*exceeds max.*`)
+
+	_, err = (DotFunCodec[maxInt]{ValueCodec: maxIntCodec{}}).Decode(bytes.NewReader(buf.Bytes()))
+	c.Assert(err, qt.IsNotNil)
+	c.Assert(err.Error(), qt.Matches, `.*exceeds max.*`)
+
+	_, err = (DotMapCodec[string, *DotSet]{KeyCodec: StringCodec{}, ValueCodec: DotSetCodec{}}).Decode(bytes.NewReader(buf.Bytes()))
+	c.Assert(err, qt.IsNotNil)
+	c.Assert(err.Error(), qt.Matches, `.*exceeds max.*`)
+}
+
+// TestDecodeOversizedNestedLength verifies that length guards inside
+// nested decode loops also reject oversized counts.
+func TestDecodeOversizedNestedLength(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("CausalContextCodec/OutlierCount", func(c *qt.C) {
+		// VV length = 0, then outlier count = maxDecodeLen+1.
+		var buf bytes.Buffer
+		Uint64Codec{}.Encode(&buf, 0)                // VV len
+		Uint64Codec{}.Encode(&buf, maxDecodeLen+1)    // outlier count
+		_, err := CausalContextCodec{}.Decode(bytes.NewReader(buf.Bytes()))
+		c.Assert(err, qt.IsNotNil)
+		c.Assert(err.Error(), qt.Matches, `.*exceeds max.*`)
+	})
+	c.Run("MissingCodec/RangeCount", func(c *qt.C) {
+		// Replica count = 1, replicaID = "a", range count = maxDecodeLen+1.
+		var buf bytes.Buffer
+		Uint64Codec{}.Encode(&buf, 1)                // num replicas
+		StringCodec{}.Encode(&buf, "a")               // replica ID
+		Uint64Codec{}.Encode(&buf, maxDecodeLen+1)    // range count
+		_, err := MissingCodec{}.Decode(bytes.NewReader(buf.Bytes()))
+		c.Assert(err, qt.IsNotNil)
+		c.Assert(err.Error(), qt.Matches, `.*exceeds max.*`)
+	})
+}
+
+// TestDecodeEmptyReader verifies that decoders fail on a zero-byte reader.
+func TestDecodeEmptyReader(t *testing.T) {
+	c := qt.New(t)
+	empty := bytes.NewReader(nil)
+
+	c.Run("DotFunCodec", func(c *qt.C) {
+		_, err := (DotFunCodec[maxInt]{ValueCodec: maxIntCodec{}}).Decode(empty)
+		c.Assert(err, qt.IsNotNil)
+	})
+	c.Run("DotMapCodec", func(c *qt.C) {
+		mc := DotMapCodec[string, *DotSet]{KeyCodec: StringCodec{}, ValueCodec: DotSetCodec{}}
+		_, err := mc.Decode(bytes.NewReader(nil))
+		c.Assert(err, qt.IsNotNil)
+	})
+	c.Run("SeqRangeCodec", func(c *qt.C) {
+		_, err := SeqRangeCodec{}.Decode(bytes.NewReader(nil))
+		c.Assert(err, qt.IsNotNil)
+	})
+	c.Run("MissingCodec", func(c *qt.C) {
+		_, err := MissingCodec{}.Decode(bytes.NewReader(nil))
+		c.Assert(err, qt.IsNotNil)
+	})
+	c.Run("DeltaBatchCodec", func(c *qt.C) {
+		bc := DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}
+		_, err := bc.Decode(bytes.NewReader(nil))
+		c.Assert(err, qt.IsNotNil)
+	})
+	c.Run("CausalCodec", func(c *qt.C) {
+		cc := CausalCodec[*DotSet]{StoreCodec: DotSetCodec{}}
+		_, err := cc.Decode(bytes.NewReader(nil))
+		c.Assert(err, qt.IsNotNil)
+	})
 }
 
 // --- Fuzz targets ---
@@ -778,6 +846,91 @@ func TestEncodeMidStreamWriterError(t *testing.T) {
 		mc := DotMapCodec[string, *DotSet]{KeyCodec: StringCodec{}, ValueCodec: DotSetCodec{}}
 		c.Assert(mc.Encode(w, dm), qt.IsNotNil)
 	})
+	c.Run("CausalContextCodec/VVEntryID", func(c *qt.C) {
+		cc := New()
+		cc.Add(Dot{ID: "a", Seq: 1}) // contiguous → VV
+		cc.Add(Dot{ID: "b", Seq: 1}) // contiguous → VV
+		// Allow VV length prefix (8) + one full VV entry (8+1+8=17), fail on second entry's string.
+		w := &limitWriter{n: 8 + (8 + 1 + 8)}
+		c.Assert(CausalContextCodec{}.Encode(w, cc), qt.IsNotNil)
+	})
+	c.Run("CausalContextCodec/VVEntrySeq", func(c *qt.C) {
+		cc := New()
+		cc.Add(Dot{ID: "a", Seq: 1}) // contiguous → VV
+		// Allow VV length prefix (8) + string "a" (8+1=9), fail writing seq.
+		w := &limitWriter{n: 8 + (8 + 1)}
+		c.Assert(CausalContextCodec{}.Encode(w, cc), qt.IsNotNil)
+	})
+	c.Run("CausalContextCodec/OutlierCount", func(c *qt.C) {
+		cc := New()
+		cc.Add(Dot{ID: "a", Seq: 3}) // outlier
+		// Allow VV length (8) + 0 VV entries. Fail writing outlier count.
+		w := &limitWriter{n: 8}
+		c.Assert(CausalContextCodec{}.Encode(w, cc), qt.IsNotNil)
+	})
+	c.Run("CausalContextCodec/OutlierDot", func(c *qt.C) {
+		cc := New()
+		cc.Add(Dot{ID: "a", Seq: 3}) // outlier
+		cc.Add(Dot{ID: "b", Seq: 5}) // outlier
+		// Allow VV length (8) + outlier count (8) + one outlier (17), fail on second.
+		w := &limitWriter{n: 8 + 8 + dotSize}
+		c.Assert(CausalContextCodec{}.Encode(w, cc), qt.IsNotNil)
+	})
+	c.Run("MissingCodec/ReplicaEntry", func(c *qt.C) {
+		m := map[ReplicaID][]SeqRange{
+			"a": {{Lo: 1, Hi: 3}},
+			"b": {{Lo: 2, Hi: 4}},
+		}
+		// Allow replica count (8) + one full entry: replicaID "a" (8+1) + range count (8) + range (16) = 41.
+		w := &limitWriter{n: 8 + (8 + 1 + 8 + 16)}
+		c.Assert(MissingCodec{}.Encode(w, m), qt.IsNotNil)
+	})
+	c.Run("DeltaBatchCodec/DeltaEntry", func(c *qt.C) {
+		deltas := map[Dot]int64{
+			{ID: "a", Seq: 1}: 10,
+			{ID: "b", Seq: 2}: 20,
+		}
+		// Allow count (8) + one dot (17) + one int64 (8) = 33, fail on second entry.
+		w := &limitWriter{n: 8 + dotSize + 8}
+		bc := DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}
+		c.Assert(bc.Encode(w, deltas), qt.IsNotNil)
+	})
+	c.Run("DotFunCodec/ValueWriteError", func(c *qt.C) {
+		df := NewDotFun[maxInt]()
+		df.Set(Dot{ID: "a", Seq: 1}, maxInt(10))
+		// Allow length prefix (8) + dot (17), fail writing the value.
+		w := &limitWriter{n: 8 + dotSize}
+		c.Assert((DotFunCodec[maxInt]{ValueCodec: maxIntCodec{}}).Encode(w, df), qt.IsNotNil)
+	})
+	c.Run("DotMapCodec/ValueWriteError", func(c *qt.C) {
+		dm := NewDotMap[string, *DotSet]()
+		ds := NewDotSet()
+		ds.Add(Dot{ID: "a", Seq: 1})
+		dm.Set("k1", ds)
+		// Allow length prefix (8) + key "k1" (8+2=10), fail writing the DotSet value.
+		w := &limitWriter{n: 8 + (8 + 2)}
+		mc := DotMapCodec[string, *DotSet]{KeyCodec: StringCodec{}, ValueCodec: DotSetCodec{}}
+		c.Assert(mc.Encode(w, dm), qt.IsNotNil)
+	})
+	c.Run("DeltaBatchCodec/DeltaValueWriteError", func(c *qt.C) {
+		deltas := map[Dot]int64{{ID: "a", Seq: 1}: 10}
+		// Allow count (8) + dot (17), fail writing the delta value.
+		w := &limitWriter{n: 8 + dotSize}
+		bc := DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}
+		c.Assert(bc.Encode(w, deltas), qt.IsNotNil)
+	})
+	c.Run("MissingCodec/RangeCountWriteError", func(c *qt.C) {
+		m := map[ReplicaID][]SeqRange{"a": {{Lo: 1, Hi: 3}}}
+		// Allow count (8) + replicaID "a" (8+1=9), fail writing range count.
+		w := &limitWriter{n: 8 + (8 + 1)}
+		c.Assert(MissingCodec{}.Encode(w, m), qt.IsNotNil)
+	})
+	c.Run("MissingCodec/RangeWriteError", func(c *qt.C) {
+		m := map[ReplicaID][]SeqRange{"a": {{Lo: 1, Hi: 3}}}
+		// Allow count (8) + replicaID "a" (8+1=9) + range count (8), fail writing range.
+		w := &limitWriter{n: 8 + (8 + 1) + 8}
+		c.Assert(MissingCodec{}.Encode(w, m), qt.IsNotNil)
+	})
 }
 
 func TestDecodeTruncatedInput(t *testing.T) {
@@ -885,6 +1038,121 @@ func TestDecodeTruncatedInput(t *testing.T) {
 		})
 		bc := DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}
 		_, err := bc.Decode(r)
+		c.Assert(err, qt.IsNotNil)
+	})
+}
+
+// TestDecodeMidStreamError verifies that decoders fail gracefully when the
+// stream contains a valid header/prefix but truncated interior fields.
+func TestDecodeMidStreamError(t *testing.T) {
+	c := qt.New(t)
+
+	// truncateAt encodes valid data, then returns only the first n bytes.
+	truncateAt := func(n int, encode func(*bytes.Buffer)) io.Reader {
+		var buf bytes.Buffer
+		encode(&buf)
+		data := buf.Bytes()
+		if n > len(data) {
+			n = len(data)
+		}
+		return bytes.NewReader(data[:n])
+	}
+
+	c.Run("CausalCodec/ContextAfterStore", func(c *qt.C) {
+		// Encode a Causal[*DotSet] with one dot. Truncate so the store
+		// decodes successfully but the context read fails.
+		ds := NewDotSet()
+		ds.Add(Dot{ID: "a", Seq: 1})
+		var storeBuf bytes.Buffer
+		DotSetCodec{}.Encode(&storeBuf, ds)
+		storeLen := storeBuf.Len()
+
+		// Allow the full store + partial context (just 1 extra byte).
+		r := truncateAt(storeLen+1, func(buf *bytes.Buffer) {
+			ctx := New()
+			ctx.Add(Dot{ID: "a", Seq: 1})
+			cc := CausalCodec[*DotSet]{StoreCodec: DotSetCodec{}}
+			cc.Encode(buf, Causal[*DotSet]{Store: ds, Context: ctx})
+		})
+		cc := CausalCodec[*DotSet]{StoreCodec: DotSetCodec{}}
+		_, err := cc.Decode(r)
+		c.Assert(err, qt.IsNotNil)
+	})
+	c.Run("SeqRangeCodec/HiTruncated", func(c *qt.C) {
+		// Encode a SeqRange, provide only the Lo field (8 bytes).
+		r := truncateAt(8, func(buf *bytes.Buffer) {
+			SeqRangeCodec{}.Encode(buf, SeqRange{Lo: 1, Hi: 5})
+		})
+		_, err := SeqRangeCodec{}.Decode(r)
+		c.Assert(err, qt.IsNotNil)
+	})
+	c.Run("CausalContextCodec/VVSeqTruncated", func(c *qt.C) {
+		// VV length says 1 entry. Provide replicaID but truncate the seq.
+		r := truncateAt(8+8+1, func(buf *bytes.Buffer) {
+			cc := New()
+			cc.Add(Dot{ID: "a", Seq: 1})
+			CausalContextCodec{}.Encode(buf, cc)
+		})
+		_, err := CausalContextCodec{}.Decode(r)
+		c.Assert(err, qt.IsNotNil)
+	})
+	c.Run("CausalContextCodec/OutlierTruncated", func(c *qt.C) {
+		// VV is empty, outlier count says 1, but the outlier dot is truncated.
+		cc := New()
+		cc.Add(Dot{ID: "a", Seq: 3}) // outlier
+
+		var buf bytes.Buffer
+		CausalContextCodec{}.Encode(&buf, cc)
+		data := buf.Bytes()
+		// 8 (VV len=0) + 8 (outlier len=1) + 17 (dot) = 33 total
+		// Truncate partway through the dot.
+		r := bytes.NewReader(data[:8+8+5])
+		_, err := CausalContextCodec{}.Decode(r)
+		c.Assert(err, qt.IsNotNil)
+	})
+	c.Run("MissingCodec/RangeCountTruncated", func(c *qt.C) {
+		// Provide replica count + replicaID, but truncate the range count.
+		r := truncateAt(8+8+1, func(buf *bytes.Buffer) {
+			m := map[ReplicaID][]SeqRange{"a": {{Lo: 1, Hi: 3}}}
+			MissingCodec{}.Encode(buf, m)
+		})
+		_, err := MissingCodec{}.Decode(r)
+		c.Assert(err, qt.IsNotNil)
+	})
+	c.Run("MissingCodec/RangeTruncated", func(c *qt.C) {
+		// Provide replica count + replicaID + range count, but truncate the range.
+		r := truncateAt(8+8+1+8+8, func(buf *bytes.Buffer) {
+			m := map[ReplicaID][]SeqRange{"a": {{Lo: 1, Hi: 3}}}
+			MissingCodec{}.Encode(buf, m)
+		})
+		_, err := MissingCodec{}.Decode(r)
+		c.Assert(err, qt.IsNotNil)
+	})
+	// Encoded size of Dot{ID: single-char, Seq: _} = 8 (len) + 1 (char) + 8 (seq) = 17.
+	const dotSize = 17
+
+	c.Run("DotFunCodec/ValueTruncated", func(c *qt.C) {
+		// Count says 1, dot decodes OK, but the value (int64) is truncated.
+		r := truncateAt(8+dotSize+4, func(buf *bytes.Buffer) {
+			df := NewDotFun[maxInt]()
+			df.Set(Dot{ID: "a", Seq: 1}, maxInt(10))
+			(DotFunCodec[maxInt]{ValueCodec: maxIntCodec{}}).Encode(buf, df)
+		})
+		_, err := (DotFunCodec[maxInt]{ValueCodec: maxIntCodec{}}).Decode(r)
+		c.Assert(err, qt.IsNotNil)
+	})
+	c.Run("DotMapCodec/ValueTruncated", func(c *qt.C) {
+		// Count says 1, key decodes OK, but the value (DotSet) is truncated.
+		r := truncateAt(8+(8+2)+4, func(buf *bytes.Buffer) {
+			dm := NewDotMap[string, *DotSet]()
+			ds := NewDotSet()
+			ds.Add(Dot{ID: "a", Seq: 1})
+			dm.Set("k1", ds)
+			mc := DotMapCodec[string, *DotSet]{KeyCodec: StringCodec{}, ValueCodec: DotSetCodec{}}
+			mc.Encode(buf, dm)
+		})
+		mc := DotMapCodec[string, *DotSet]{KeyCodec: StringCodec{}, ValueCodec: DotSetCodec{}}
+		_, err := mc.Decode(r)
 		c.Assert(err, qt.IsNotNil)
 	})
 }

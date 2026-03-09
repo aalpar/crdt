@@ -794,6 +794,51 @@ func TestE2ELWWTiebreakAcrossWire(t *testing.T) {
 	c.Assert(bobVal, qt.Equals, "from-bob", qt.Commentf("tiebreak: bob > alice"))
 }
 
+// TestE2EGCThenWriteDeltaBatch verifies the full lifecycle:
+// add deltas → ack peers → GC → WriteDeltaBatch handles the post-GC
+// store gracefully (Missing still returns ranges, but Fetch finds
+// nothing because GC already removed them).
+func TestE2EGCThenWriteDeltaBatch(t *testing.T) {
+	c := qt.New(t)
+	codec := newAWSetDeltaCodec()
+
+	alice := newReplica("alice", "bob")
+	bob := newReplica("bob", "alice")
+
+	// Alice adds two elements.
+	alice.add("x")
+	alice.add("y")
+	c.Assert(alice.store.Len(), qt.Equals, 2)
+
+	// Sync alice → bob.
+	n, err := sync(alice, bob, codec)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, 2)
+
+	// Bob has acked. GC should remove alice's deltas.
+	removed := GC(alice.store, alice.tracker)
+	c.Assert(removed, qt.Equals, 2)
+	c.Assert(alice.store.Len(), qt.Equals, 0)
+
+	// Now a new peer "carol" joins, knowing nothing.
+	alice.tracker.AddPeer("carol", nil)
+	carolCC := dotcontext.New() // carol knows nothing
+
+	// WriteDeltaBatch: carol is missing alice's dots (a:1,a:2) per
+	// Missing(), but the DeltaStore is empty after GC. WriteDeltaBatch
+	// should write zero deltas without error.
+	var buf bytes.Buffer
+	nWritten, err := WriteDeltaBatch(
+		alice.set.State().Context,
+		carolCC,
+		alice.store,
+		codec,
+		&buf,
+	)
+	c.Assert(err, qt.IsNil)
+	c.Assert(nWritten, qt.Equals, 0)
+}
+
 // TestE2EPNCounterDecrementAcrossWire verifies that negative contributions
 // (decrements) survive encode→decode→merge and produce the correct sum.
 func TestE2EPNCounterDecrementAcrossWire(t *testing.T) {

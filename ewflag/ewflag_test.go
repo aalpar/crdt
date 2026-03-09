@@ -252,6 +252,37 @@ func TestDeltaPropagation(t *testing.T) {
 	})
 }
 
+func TestMergeWithEmpty(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("IntoEmpty", func(c *qt.C) {
+		a := New("a")
+		a.Enable()
+
+		b := New("b")
+		b.Merge(a)
+		c.Assert(b.Value(), qt.IsTrue)
+	})
+
+	c.Run("EmptyIntoEnabled", func(c *qt.C) {
+		a := New("a")
+		a.Enable()
+
+		empty := New("b")
+		a.Merge(empty)
+		c.Assert(a.Value(), qt.IsTrue)
+	})
+
+	c.Run("EmptyIntoDisabled", func(c *qt.C) {
+		a := New("a")
+		// a is disabled by default
+
+		empty := New("b")
+		a.Merge(empty)
+		c.Assert(a.Value(), qt.IsFalse)
+	})
+}
+
 func TestStateRoundTrip(t *testing.T) {
 	c := qt.New(t)
 

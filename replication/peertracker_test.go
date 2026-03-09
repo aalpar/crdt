@@ -122,6 +122,46 @@ func TestPeerTrackerAck(t *testing.T) {
 		pending = tr.Pending("peer1", local)
 		c.Assert(pending, qt.IsNil) // fully synced
 	})
+	c.Run("CompactsOutliers", func(c *qt.C) {
+		tr := NewPeerTracker()
+		tr.AddPeer("peer1", nil)
+
+		// Ack out-of-order: a:3, a:1, a:2. After each Ack, Compact
+		// should promote contiguous outliers into the version vector.
+
+		// a:3 arrives first — outlier (vv["a"]=0, gap at 1,2).
+		ack1 := dotcontext.New()
+		ack1.Add(dotcontext.Dot{ID: "a", Seq: 3})
+		tr.Ack("peer1", ack1)
+		c.Assert(tr.CanGC(dotcontext.Dot{ID: "a", Seq: 3}), qt.IsTrue)
+		c.Assert(tr.CanGC(dotcontext.Dot{ID: "a", Seq: 1}), qt.IsFalse)
+
+		// a:1 arrives — contiguous, promotes vv["a"]=1. a:2 still missing.
+		ack2 := dotcontext.New()
+		ack2.Add(dotcontext.Dot{ID: "a", Seq: 1})
+		tr.Ack("peer1", ack2)
+		c.Assert(tr.CanGC(dotcontext.Dot{ID: "a", Seq: 1}), qt.IsTrue)
+		c.Assert(tr.CanGC(dotcontext.Dot{ID: "a", Seq: 2}), qt.IsFalse)
+
+		// a:2 fills the gap — Compact promotes vv["a"]=3, no outliers remain.
+		// Key: after this, Has(a:3) must be true via VV, not outlier lookup.
+		ack3 := dotcontext.New()
+		ack3.Add(dotcontext.Dot{ID: "a", Seq: 2})
+		tr.Ack("peer1", ack3)
+
+		// All three dots now covered by VV.
+		for seq := uint64(1); seq <= 3; seq++ {
+			c.Assert(tr.CanGC(dotcontext.Dot{ID: "a", Seq: seq}), qt.IsTrue,
+				qt.Commentf("a:%d should be GC-able after compact", seq))
+		}
+
+		// Pending should report nothing against a context with a:1..3.
+		local := dotcontext.New()
+		local.Next("a") // a:1
+		local.Next("a") // a:2
+		local.Next("a") // a:3
+		c.Assert(tr.Pending("peer1", local), qt.IsNil)
+	})
 	c.Run("ThenCanGC", func(c *qt.C) {
 		tr := NewPeerTracker()
 		dot := dotcontext.Dot{ID: "a", Seq: 1}
