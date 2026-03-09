@@ -73,6 +73,11 @@ func (r *MVRegister[V]) Write(v V) *MVRegister[V] {
 	}
 }
 
+// Merge incorporates a delta or full state from another register.
+func (r *MVRegister[V]) Merge(other *MVRegister[V]) {
+	r.state = dotcontext.JoinDotFun(r.state, other.state)
+}
+
 // Values returns all concurrently-written values. In quiescent state
 // (no unmerged concurrent writes), this returns zero or one value.
 // The order is non-deterministic.
