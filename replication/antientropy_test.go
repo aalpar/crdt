@@ -67,6 +67,69 @@ func TestWriteDeltaBatchFullySynced(t *testing.T) {
 	c.Assert(nRead, qt.Equals, 0)
 }
 
+func TestWriteReadDeltaBatchMultiReplica(t *testing.T) {
+	c := qt.New(t)
+
+	localCC := dotcontext.New()
+	localCC.Add(dotcontext.Dot{ID: "a", Seq: 1})
+	localCC.Add(dotcontext.Dot{ID: "a", Seq: 2})
+	localCC.Add(dotcontext.Dot{ID: "b", Seq: 1})
+	localCC.Add(dotcontext.Dot{ID: "c", Seq: 1})
+
+	remoteCC := dotcontext.New()
+	// Remote is missing everything.
+
+	store := dotcontext.NewDeltaStore[int64]()
+	store.Add(dotcontext.Dot{ID: "a", Seq: 1}, 10)
+	store.Add(dotcontext.Dot{ID: "a", Seq: 2}, 20)
+	store.Add(dotcontext.Dot{ID: "b", Seq: 1}, 30)
+	store.Add(dotcontext.Dot{ID: "c", Seq: 1}, 40)
+
+	var buf bytes.Buffer
+	n, err := WriteDeltaBatch(localCC, remoteCC, store, int64Codec{}, &buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, 4)
+
+	received := make(map[dotcontext.Dot]int64)
+	nRead, err := ReadDeltaBatch(int64Codec{}, &buf, func(d dotcontext.Dot, v int64) {
+		received[d] = v
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(nRead, qt.Equals, 4)
+}
+
+func TestWriteReadDeltaBatchBothEmpty(t *testing.T) {
+	c := qt.New(t)
+	localCC := dotcontext.New()
+	remoteCC := dotcontext.New()
+	store := dotcontext.NewDeltaStore[int64]()
+
+	var buf bytes.Buffer
+	n, err := WriteDeltaBatch(localCC, remoteCC, store, int64Codec{}, &buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, 0)
+
+	nRead, err := ReadDeltaBatch(int64Codec{}, &buf, func(d dotcontext.Dot, v int64) {
+		c.Fatal("unexpected delta")
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(nRead, qt.Equals, 0)
+}
+
+func TestWriteDeltaBatchEmptyStore(t *testing.T) {
+	c := qt.New(t)
+	localCC := dotcontext.New()
+	localCC.Add(dotcontext.Dot{ID: "a", Seq: 1})
+
+	remoteCC := dotcontext.New()
+	store := dotcontext.NewDeltaStore[int64]()
+
+	var buf bytes.Buffer
+	n, err := WriteDeltaBatch(localCC, remoteCC, store, int64Codec{}, &buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, 0)
+}
+
 func TestWriteDeltaBatchMissingNotInStore(t *testing.T) {
 	c := qt.New(t)
 

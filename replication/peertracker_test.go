@@ -159,6 +159,74 @@ func TestPendingUnknownPeer(t *testing.T) {
 	c.Assert(tr.Pending("ghost", local), qt.IsNil)
 }
 
+func TestAckThenCanGC(t *testing.T) {
+	c := qt.New(t)
+	tr := NewPeerTracker()
+	dot := dotcontext.Dot{ID: "a", Seq: 1}
+
+	tr.AddPeer("peer1", nil)
+	tr.AddPeer("peer2", nil)
+
+	c.Assert(tr.CanGC(dot), qt.IsFalse)
+
+	ack1 := dotcontext.New()
+	ack1.Add(dot)
+	tr.Ack("peer1", ack1)
+
+	c.Assert(tr.CanGC(dot), qt.IsFalse) // peer2 still behind
+
+	ack2 := dotcontext.New()
+	ack2.Add(dot)
+	tr.Ack("peer2", ack2)
+
+	c.Assert(tr.CanGC(dot), qt.IsTrue) // both acked
+}
+
+func TestAckProgressiveAdvancement(t *testing.T) {
+	c := qt.New(t)
+	tr := NewPeerTracker()
+	tr.AddPeer("peer1", nil)
+
+	local := dotcontext.New()
+	local.Next("a") // a:1
+	local.Next("a") // a:2
+	local.Next("a") // a:3
+
+	// Initially all pending.
+	pending := tr.Pending("peer1", local)
+	c.Assert(pending["a"], qt.HasLen, 1)
+	c.Assert(pending["a"][0], qt.Equals, dotcontext.SeqRange{Lo: 1, Hi: 3})
+
+	// Ack a:1.
+	ack := dotcontext.New()
+	ack.Add(dotcontext.Dot{ID: "a", Seq: 1})
+	tr.Ack("peer1", ack)
+
+	pending = tr.Pending("peer1", local)
+	c.Assert(pending["a"], qt.HasLen, 1)
+	c.Assert(pending["a"][0], qt.Equals, dotcontext.SeqRange{Lo: 2, Hi: 3})
+
+	// Ack up to a:3.
+	ack2 := dotcontext.New()
+	ack2.Add(dotcontext.Dot{ID: "a", Seq: 2})
+	ack2.Add(dotcontext.Dot{ID: "a", Seq: 3})
+	tr.Ack("peer1", ack2)
+
+	pending = tr.Pending("peer1", local)
+	c.Assert(pending, qt.IsNil) // fully synced
+}
+
+func TestPendingFullySynced(t *testing.T) {
+	c := qt.New(t)
+	tr := NewPeerTracker()
+	local := dotcontext.New()
+	local.Next("a")
+
+	tr.AddPeer("peer1", local.Clone())
+
+	c.Assert(tr.Pending("peer1", local), qt.IsNil)
+}
+
 func TestPendingComposesWithFetch(t *testing.T) {
 	c := qt.New(t)
 	local := dotcontext.New()
