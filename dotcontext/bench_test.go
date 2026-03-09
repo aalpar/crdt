@@ -98,6 +98,26 @@ func BenchmarkContextMerge(b *testing.B) {
 	}
 }
 
+func BenchmarkContextMergeOutliers(b *testing.B) {
+	for _, n := range []int{10, 100, 1000} {
+		b.Run(fmt.Sprintf("outliers/%d", n), func(b *testing.B) {
+			// Build two contexts with interleaved outliers above the VV frontier.
+			// a has even seqs, bb has odd seqs — forces a full sorted merge.
+			a := New()
+			bb := New()
+			id := ReplicaID("r0")
+			for i := range n {
+				a.Add(Dot{ID: id, Seq: uint64(2*i + 10)})
+				bb.Add(Dot{ID: id, Seq: uint64(2*i + 11)})
+			}
+			for b.Loop() {
+				c := a.Clone()
+				c.Merge(bb)
+			}
+		})
+	}
+}
+
 // --- Join benchmarks ---
 
 func makeCausalDotSet(nReplicas, dotsPerReplica int) Causal[*DotSet] {

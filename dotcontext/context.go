@@ -74,15 +74,41 @@ func (p *CausalContext) Merge(other *CausalContext) {
 	}
 	for id, otherSeqs := range other.outliers {
 		frontier := p.vv[id]
-		for _, seq := range otherSeqs {
-			if seq <= frontier {
-				continue
+		local := p.outliers[id]
+		if len(otherSeqs) == 0 {
+			continue
+		}
+		// Sorted merge: both slices are sorted, produce a merged sorted
+		// slice in O(len(local) + len(otherSeqs)) instead of O(m×n).
+		merged := make([]uint64, 0, len(local)+len(otherSeqs))
+		i, j := 0, 0
+		for i < len(local) && j < len(otherSeqs) {
+			lv, rv := local[i], otherSeqs[j]
+			if lv < rv {
+				merged = append(merged, lv)
+				i++
+			} else if lv > rv {
+				if rv > frontier {
+					merged = append(merged, rv)
+				}
+				j++
+			} else {
+				// duplicate — take one copy
+				merged = append(merged, lv)
+				i++
+				j++
 			}
-			seqs := p.outliers[id]
-			i, found := slices.BinarySearch(seqs, seq)
-			if !found {
-				p.outliers[id] = slices.Insert(seqs, i, seq)
+		}
+		merged = append(merged, local[i:]...)
+		for ; j < len(otherSeqs); j++ {
+			if otherSeqs[j] > frontier {
+				merged = append(merged, otherSeqs[j])
 			}
+		}
+		if len(merged) == 0 {
+			delete(p.outliers, id)
+		} else {
+			p.outliers[id] = merged
 		}
 	}
 }
