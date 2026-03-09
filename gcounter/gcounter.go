@@ -8,6 +8,10 @@ import (
 // It implements dotcontext.Lattice. Under normal operation, JoinDotFun
 // only calls Join when both sides share the same dot, so values are
 // identical and either is correct. Join returns the receiver unchanged.
+//
+// NOTE: pncounter.Counter follows the same find-own-dot/replace/build-delta
+// pattern with int64 instead of uint64. Changes to the Increment logic
+// here should be mirrored there (and vice versa).
 type GValue struct {
 	N uint64
 }

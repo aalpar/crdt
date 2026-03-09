@@ -8,6 +8,10 @@ import (
 // It implements dotcontext.Lattice. Under normal operation, JoinDotFun
 // only calls Join when both sides share the same dot, so values are
 // identical and either is correct. Join returns the receiver unchanged.
+//
+// NOTE: gcounter.Counter follows the same find-own-dot/replace/build-delta
+// pattern with uint64 instead of int64. Changes to the Increment logic
+// here should be mirrored there (and vice versa).
 type CounterValue struct {
 	N int64
 }

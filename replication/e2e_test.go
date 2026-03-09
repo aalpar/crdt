@@ -15,31 +15,16 @@ import (
 	"github.com/aalpar/crdt/mvregister"
 	"github.com/aalpar/crdt/ormap"
 	"github.com/aalpar/crdt/pncounter"
+	"github.com/aalpar/crdt/rwset"
 )
 
-// awsetDeltaCodec encodes AWSet deltas (Causal[*DotMap[string, *DotSet]])
-// for transmission over the replication pipeline.
-type awsetDeltaCodec struct {
-	inner dotcontext.CausalCodec[*dotcontext.DotMap[string, *dotcontext.DotSet]]
-}
-
-func newAWSetDeltaCodec() awsetDeltaCodec {
-	return awsetDeltaCodec{
-		inner: dotcontext.CausalCodec[*dotcontext.DotMap[string, *dotcontext.DotSet]]{
-			StoreCodec: dotcontext.DotMapCodec[string, *dotcontext.DotSet]{
-				KeyCodec:   dotcontext.StringCodec{},
-				ValueCodec: dotcontext.DotSetCodec{},
-			},
+func newAWSetCodec() dotcontext.CausalCodec[*dotcontext.DotMap[string, *dotcontext.DotSet]] {
+	return dotcontext.CausalCodec[*dotcontext.DotMap[string, *dotcontext.DotSet]]{
+		StoreCodec: dotcontext.DotMapCodec[string, *dotcontext.DotSet]{
+			KeyCodec:   dotcontext.StringCodec{},
+			ValueCodec: dotcontext.DotSetCodec{},
 		},
 	}
-}
-
-func (c awsetDeltaCodec) Encode(w io.Writer, v dotcontext.Causal[*dotcontext.DotMap[string, *dotcontext.DotSet]]) error {
-	return c.inner.Encode(w, v)
-}
-
-func (c awsetDeltaCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.DotMap[string, *dotcontext.DotSet]], error) {
-	return c.inner.Decode(r)
 }
 
 // replica bundles the state a single node maintains for replication.
@@ -81,7 +66,7 @@ func (r *replica) add(elem string) {
 
 // sync sends missing deltas from src to dst over an in-memory wire.
 // Returns the number of deltas transferred.
-func sync(src, dst *replica, codec awsetDeltaCodec) (int, error) {
+func sync(src, dst *replica, codec dotcontext.CausalCodec[*dotcontext.DotMap[string, *dotcontext.DotSet]]) (int, error) {
 	var buf bytes.Buffer
 	n, err := WriteDeltaBatch(
 		src.set.State().Context,
@@ -124,7 +109,7 @@ func sortedElements(s *awset.AWSet[string]) []string {
 // and verify convergence. Then GC cleans up acknowledged deltas.
 func TestE2EReplicationCycle(t *testing.T) {
 	c := qt.New(t)
-	codec := newAWSetDeltaCodec()
+	codec := newAWSetCodec()
 
 	alice := newReplica("alice", "bob")
 	bob := newReplica("bob", "alice")
@@ -172,7 +157,7 @@ func TestE2EReplicationCycle(t *testing.T) {
 // convergence, followed by GC.
 func TestE2EThreeReplicaMesh(t *testing.T) {
 	c := qt.New(t)
-	codec := newAWSetDeltaCodec()
+	codec := newAWSetCodec()
 
 	r1 := newReplica("r1", "r2", "r3")
 	r2 := newReplica("r2", "r1", "r3")
@@ -217,7 +202,7 @@ func TestE2EThreeReplicaMesh(t *testing.T) {
 // Alice adds "x", Bob concurrently removes "x", sync resolves to add-wins.
 func TestE2EAddWinsAcrossWire(t *testing.T) {
 	c := qt.New(t)
-	codec := newAWSetDeltaCodec()
+	codec := newAWSetCodec()
 
 	alice := newReplica("alice", "bob")
 	bob := newReplica("bob", "alice")
@@ -251,7 +236,7 @@ func TestE2EAddWinsAcrossWire(t *testing.T) {
 // transfer only new deltas each time.
 func TestE2EIncrementalSync(t *testing.T) {
 	c := qt.New(t)
-	codec := newAWSetDeltaCodec()
+	codec := newAWSetCodec()
 
 	alice := newReplica("alice", "bob")
 	bob := newReplica("bob", "alice")
@@ -294,7 +279,7 @@ func TestE2EIncrementalSync(t *testing.T) {
 // case and the merge correctly removes the element.
 func TestE2ERemoveDeltaAcrossWire(t *testing.T) {
 	c := qt.New(t)
-	codec := newAWSetDeltaCodec()
+	codec := newAWSetCodec()
 
 	alice := newReplica("alice", "bob")
 	bob := newReplica("bob", "alice")
@@ -337,7 +322,7 @@ func TestE2ERemoveDeltaAcrossWire(t *testing.T) {
 // batch twice is idempotent — the second merge has no effect.
 func TestE2EDuplicateDeltaDelivery(t *testing.T) {
 	c := qt.New(t)
-	codec := newAWSetDeltaCodec()
+	codec := newAWSetCodec()
 
 	alice := newReplica("alice", "bob")
 	bob := newReplica("bob", "alice")
@@ -379,7 +364,7 @@ func TestE2EDuplicateDeltaDelivery(t *testing.T) {
 // order than they were generated produce the same converged state.
 func TestE2EOutOfOrderDelivery(t *testing.T) {
 	c := qt.New(t)
-	codec := newAWSetDeltaCodec()
+	codec := newAWSetCodec()
 
 	alice := newReplica("alice", "bob")
 
@@ -451,26 +436,12 @@ func (timestampedStringCodec) Decode(r io.Reader) (lwwregister.Timestamped[strin
 	return lwwregister.Timestamped[string]{Value: val, Ts: ts}, nil
 }
 
-type lwwDeltaCodec struct {
-	inner dotcontext.CausalCodec[*dotcontext.DotFun[lwwregister.Timestamped[string]]]
-}
-
-func newLWWDeltaCodec() lwwDeltaCodec {
-	return lwwDeltaCodec{
-		inner: dotcontext.CausalCodec[*dotcontext.DotFun[lwwregister.Timestamped[string]]]{
-			StoreCodec: dotcontext.DotFunCodec[lwwregister.Timestamped[string]]{
-				ValueCodec: timestampedStringCodec{},
-			},
+func newLWWCodec() dotcontext.CausalCodec[*dotcontext.DotFun[lwwregister.Timestamped[string]]] {
+	return dotcontext.CausalCodec[*dotcontext.DotFun[lwwregister.Timestamped[string]]]{
+		StoreCodec: dotcontext.DotFunCodec[lwwregister.Timestamped[string]]{
+			ValueCodec: timestampedStringCodec{},
 		},
 	}
-}
-
-func (c lwwDeltaCodec) Encode(w io.Writer, v dotcontext.Causal[*dotcontext.DotFun[lwwregister.Timestamped[string]]]) error {
-	return c.inner.Encode(w, v)
-}
-
-func (c lwwDeltaCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.DotFun[lwwregister.Timestamped[string]]], error) {
-	return c.inner.Decode(r)
 }
 
 // TestE2ELWWRegisterAcrossWire verifies that LWWRegister deltas
@@ -478,7 +449,7 @@ func (c lwwDeltaCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.DotFun
 // and that LWW conflict resolution works across the wire.
 func TestE2ELWWRegisterAcrossWire(t *testing.T) {
 	c := qt.New(t)
-	codec := newLWWDeltaCodec()
+	codec := newLWWCodec()
 
 	alice := lwwregister.New[string]("alice")
 	bob := lwwregister.New[string]("bob")
@@ -525,26 +496,12 @@ func (counterValueCodec) Decode(r io.Reader) (pncounter.CounterValue, error) {
 	return pncounter.CounterValue{N: n}, err
 }
 
-type counterDeltaCodec struct {
-	inner dotcontext.CausalCodec[*dotcontext.DotFun[pncounter.CounterValue]]
-}
-
-func newCounterDeltaCodec() counterDeltaCodec {
-	return counterDeltaCodec{
-		inner: dotcontext.CausalCodec[*dotcontext.DotFun[pncounter.CounterValue]]{
-			StoreCodec: dotcontext.DotFunCodec[pncounter.CounterValue]{
-				ValueCodec: counterValueCodec{},
-			},
+func newCounterCodec() dotcontext.CausalCodec[*dotcontext.DotFun[pncounter.CounterValue]] {
+	return dotcontext.CausalCodec[*dotcontext.DotFun[pncounter.CounterValue]]{
+		StoreCodec: dotcontext.DotFunCodec[pncounter.CounterValue]{
+			ValueCodec: counterValueCodec{},
 		},
 	}
-}
-
-func (c counterDeltaCodec) Encode(w io.Writer, v dotcontext.Causal[*dotcontext.DotFun[pncounter.CounterValue]]) error {
-	return c.inner.Encode(w, v)
-}
-
-func (c counterDeltaCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.DotFun[pncounter.CounterValue]], error) {
-	return c.inner.Decode(r)
 }
 
 // TestE2EPNCounterAcrossWire verifies that PNCounter deltas
@@ -552,7 +509,7 @@ func (c counterDeltaCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.Do
 // and that concurrent increments sum correctly across the wire.
 func TestE2EPNCounterAcrossWire(t *testing.T) {
 	c := qt.New(t)
-	codec := newCounterDeltaCodec()
+	codec := newCounterCodec()
 
 	alice := pncounter.New("alice")
 	bob := pncounter.New("bob")
@@ -582,24 +539,10 @@ func TestE2EPNCounterAcrossWire(t *testing.T) {
 
 // --- EWFlag codec ---
 
-type ewflagDeltaCodec struct {
-	inner dotcontext.CausalCodec[*dotcontext.DotSet]
-}
-
-func newEWFlagDeltaCodec() ewflagDeltaCodec {
-	return ewflagDeltaCodec{
-		inner: dotcontext.CausalCodec[*dotcontext.DotSet]{
-			StoreCodec: dotcontext.DotSetCodec{},
-		},
+func newFlagCodec() dotcontext.CausalCodec[*dotcontext.DotSet] {
+	return dotcontext.CausalCodec[*dotcontext.DotSet]{
+		StoreCodec: dotcontext.DotSetCodec{},
 	}
-}
-
-func (c ewflagDeltaCodec) Encode(w io.Writer, v dotcontext.Causal[*dotcontext.DotSet]) error {
-	return c.inner.Encode(w, v)
-}
-
-func (c ewflagDeltaCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.DotSet], error) {
-	return c.inner.Decode(r)
 }
 
 // TestE2EEWFlagAcrossWire verifies that EWFlag deltas (DotSet-based)
@@ -607,7 +550,7 @@ func (c ewflagDeltaCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.Dot
 // works across the wire.
 func TestE2EEWFlagAcrossWire(t *testing.T) {
 	c := qt.New(t)
-	codec := newEWFlagDeltaCodec()
+	codec := newFlagCodec()
 
 	alice := ewflag.New("alice")
 	bob := ewflag.New("bob")
@@ -654,7 +597,7 @@ func TestE2EEWFlagAcrossWire(t *testing.T) {
 func TestE2EORMapAddWinsAcrossWire(t *testing.T) {
 	c := qt.New(t)
 	// ORMap[string, *DotSet] shares AWSet's wire format.
-	codec := newAWSetDeltaCodec()
+	codec := newAWSetCodec()
 
 	newMap := func(id string) *ormap.ORMap[string, *dotcontext.DotSet] {
 		return ormap.New[string, *dotcontext.DotSet](
@@ -713,7 +656,7 @@ func TestE2EORMapAddWinsAcrossWire(t *testing.T) {
 // across the wire — both dots survive under the same key.
 func TestE2EORMapNestedMergeAcrossWire(t *testing.T) {
 	c := qt.New(t)
-	codec := newAWSetDeltaCodec()
+	codec := newAWSetCodec()
 
 	newMap := func(id string) *ormap.ORMap[string, *dotcontext.DotSet] {
 		return ormap.New[string, *dotcontext.DotSet](
@@ -765,7 +708,7 @@ func TestE2EORMapNestedMergeAcrossWire(t *testing.T) {
 // (lexicographic on replica ID) works across the wire.
 func TestE2ELWWTiebreakAcrossWire(t *testing.T) {
 	c := qt.New(t)
-	codec := newLWWDeltaCodec()
+	codec := newLWWCodec()
 
 	alice := lwwregister.New[string]("alice")
 	bob := lwwregister.New[string]("bob")
@@ -801,7 +744,7 @@ func TestE2ELWWTiebreakAcrossWire(t *testing.T) {
 // nothing because GC already removed them).
 func TestE2EGCThenWriteDeltaBatch(t *testing.T) {
 	c := qt.New(t)
-	codec := newAWSetDeltaCodec()
+	codec := newAWSetCodec()
 
 	alice := newReplica("alice", "bob")
 	bob := newReplica("bob", "alice")
@@ -844,7 +787,7 @@ func TestE2EGCThenWriteDeltaBatch(t *testing.T) {
 // (decrements) survive encode→decode→merge and produce the correct sum.
 func TestE2EPNCounterDecrementAcrossWire(t *testing.T) {
 	c := qt.New(t)
-	codec := newCounterDeltaCodec()
+	codec := newCounterCodec()
 
 	alice := pncounter.New("alice")
 	bob := pncounter.New("bob")
@@ -885,26 +828,12 @@ func (mvrValueStringCodec) Decode(r io.Reader) (mvregister.Value[string], error)
 	return mvregister.Value[string]{V: s}, err
 }
 
-type mvrDeltaCodec struct {
-	inner dotcontext.CausalCodec[*dotcontext.DotFun[mvregister.Value[string]]]
-}
-
-func newMVRDeltaCodec() mvrDeltaCodec {
-	return mvrDeltaCodec{
-		inner: dotcontext.CausalCodec[*dotcontext.DotFun[mvregister.Value[string]]]{
-			StoreCodec: dotcontext.DotFunCodec[mvregister.Value[string]]{
-				ValueCodec: mvrValueStringCodec{},
-			},
+func newMVRCodec() dotcontext.CausalCodec[*dotcontext.DotFun[mvregister.Value[string]]] {
+	return dotcontext.CausalCodec[*dotcontext.DotFun[mvregister.Value[string]]]{
+		StoreCodec: dotcontext.DotFunCodec[mvregister.Value[string]]{
+			ValueCodec: mvrValueStringCodec{},
 		},
 	}
-}
-
-func (c mvrDeltaCodec) Encode(w io.Writer, v dotcontext.Causal[*dotcontext.DotFun[mvregister.Value[string]]]) error {
-	return c.inner.Encode(w, v)
-}
-
-func (c mvrDeltaCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.DotFun[mvregister.Value[string]]], error) {
-	return c.inner.Decode(r)
 }
 
 // TestE2EMVRegisterAcrossWire verifies that MVRegister deltas
@@ -913,7 +842,7 @@ func (c mvrDeltaCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.DotFun
 // multiple values rather than picking a winner.
 func TestE2EMVRegisterAcrossWire(t *testing.T) {
 	c := qt.New(t)
-	codec := newMVRDeltaCodec()
+	codec := newMVRCodec()
 
 	alice := mvregister.New[string]("alice")
 	bob := mvregister.New[string]("bob")
@@ -943,4 +872,154 @@ func TestE2EMVRegisterAcrossWire(t *testing.T) {
 		sort.Strings(vals)
 		c.Assert(vals, qt.DeepEquals, expected)
 	}
+}
+
+// --- RWSet codec ---
+
+// presenceCodec encodes rwset.Presence as a single byte (1=active, 0=inactive).
+type presenceCodec struct{}
+
+func (presenceCodec) Encode(w io.Writer, v rwset.Presence) error {
+	var b byte
+	if v.Active {
+		b = 1
+	}
+	_, err := w.Write([]byte{b})
+	return err
+}
+
+func (presenceCodec) Decode(r io.Reader) (rwset.Presence, error) {
+	var buf [1]byte
+	if _, err := io.ReadFull(r, buf[:]); err != nil {
+		return rwset.Presence{}, err
+	}
+	return rwset.Presence{Active: buf[0] == 1}, nil
+}
+
+func newRWSetCodec() dotcontext.CausalCodec[*dotcontext.DotMap[string, *dotcontext.DotFun[rwset.Presence]]] {
+	return dotcontext.CausalCodec[*dotcontext.DotMap[string, *dotcontext.DotFun[rwset.Presence]]]{
+		StoreCodec: dotcontext.DotMapCodec[string, *dotcontext.DotFun[rwset.Presence]]{
+			KeyCodec: dotcontext.StringCodec{},
+			ValueCodec: dotcontext.DotFunCodec[rwset.Presence]{
+				ValueCodec: presenceCodec{},
+			},
+		},
+	}
+}
+
+// TestE2ERWSetRemoveWinsAcrossWire verifies that RWSet deltas
+// (DotMap[E, *DotFun[Presence]] — the deepest wire nesting) survive
+// encode→decode→merge and that remove-wins conflict resolution
+// works across the wire.
+func TestE2ERWSetRemoveWinsAcrossWire(t *testing.T) {
+	c := qt.New(t)
+	codec := newRWSetCodec()
+
+	alice := rwset.New[string]("alice")
+	bob := rwset.New[string]("bob")
+
+	// Both start with "x" by syncing alice's add.
+	aliceAdd := alice.Add("x")
+	var buf bytes.Buffer
+	c.Assert(codec.Encode(&buf, aliceAdd.State()), qt.IsNil)
+	decoded, err := codec.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(rwset.FromCausal[string](decoded))
+	c.Assert(alice.Has("x"), qt.IsTrue)
+	c.Assert(bob.Has("x"), qt.IsTrue)
+
+	// Concurrent: alice re-adds "x" (new dot, Active), bob removes "x" (new dot, Inactive).
+	aliceDelta := alice.Add("x")
+	bobDelta := bob.Remove("x")
+
+	// Encode both deltas.
+	var bufA, bufB bytes.Buffer
+	c.Assert(codec.Encode(&bufA, aliceDelta.State()), qt.IsNil)
+	c.Assert(codec.Encode(&bufB, bobDelta.State()), qt.IsNil)
+
+	// Cross-merge.
+	decodedA, err := codec.Decode(&bufA)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(rwset.FromCausal[string](decodedA))
+
+	decodedB, err := codec.Decode(&bufB)
+	c.Assert(err, qt.IsNil)
+	alice.Merge(rwset.FromCausal[string](decodedB))
+
+	// Remove wins: bob's tombstone dot survives alongside alice's add dot.
+	// Has requires ALL dots to be Active, so the tombstone wins.
+	c.Assert(alice.Has("x"), qt.IsFalse, qt.Commentf("remove-wins: x must be absent"))
+	c.Assert(bob.Has("x"), qt.IsFalse, qt.Commentf("remove-wins: x must be absent"))
+}
+
+// TestE2ERWSetConcurrentAddsAcrossWire verifies that concurrent adds
+// from different replicas both survive across the wire — both dots are
+// Active so the element is present.
+func TestE2ERWSetConcurrentAddsAcrossWire(t *testing.T) {
+	c := qt.New(t)
+	codec := newRWSetCodec()
+
+	alice := rwset.New[string]("alice")
+	bob := rwset.New[string]("bob")
+
+	// Concurrent adds of the same element.
+	aliceDelta := alice.Add("x")
+	bobDelta := bob.Add("x")
+
+	// Encode both deltas.
+	var bufA, bufB bytes.Buffer
+	c.Assert(codec.Encode(&bufA, aliceDelta.State()), qt.IsNil)
+	c.Assert(codec.Encode(&bufB, bobDelta.State()), qt.IsNil)
+
+	// Cross-merge.
+	decodedA, err := codec.Decode(&bufA)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(rwset.FromCausal[string](decodedA))
+
+	decodedB, err := codec.Decode(&bufB)
+	c.Assert(err, qt.IsNil)
+	alice.Merge(rwset.FromCausal[string](decodedB))
+
+	// Both dots are Active, so element is present.
+	c.Assert(alice.Has("x"), qt.IsTrue, qt.Commentf("concurrent adds: x must be present"))
+	c.Assert(bob.Has("x"), qt.IsTrue, qt.Commentf("concurrent adds: x must be present"))
+}
+
+// TestE2ERWSetReAddAfterRemoveAcrossWire verifies the add→remove→re-add
+// cycle across the wire: after a remove-wins resolution, a subsequent
+// add from the same replica restores the element.
+func TestE2ERWSetReAddAfterRemoveAcrossWire(t *testing.T) {
+	c := qt.New(t)
+	codec := newRWSetCodec()
+
+	alice := rwset.New[string]("alice")
+	bob := rwset.New[string]("bob")
+
+	// Alice adds "x", syncs to bob.
+	d1 := alice.Add("x")
+	var buf1 bytes.Buffer
+	c.Assert(codec.Encode(&buf1, d1.State()), qt.IsNil)
+	dec1, err := codec.Decode(&buf1)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(rwset.FromCausal[string](dec1))
+
+	// Alice removes "x", syncs to bob.
+	d2 := alice.Remove("x")
+	var buf2 bytes.Buffer
+	c.Assert(codec.Encode(&buf2, d2.State()), qt.IsNil)
+	dec2, err := codec.Decode(&buf2)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(rwset.FromCausal[string](dec2))
+	c.Assert(bob.Has("x"), qt.IsFalse)
+
+	// Alice re-adds "x", syncs to bob — new dot supersedes the tombstone.
+	d3 := alice.Add("x")
+	var buf3 bytes.Buffer
+	c.Assert(codec.Encode(&buf3, d3.State()), qt.IsNil)
+	dec3, err := codec.Decode(&buf3)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(rwset.FromCausal[string](dec3))
+
+	c.Assert(alice.Has("x"), qt.IsTrue, qt.Commentf("re-add must restore element"))
+	c.Assert(bob.Has("x"), qt.IsTrue, qt.Commentf("re-add must restore element on remote"))
 }
