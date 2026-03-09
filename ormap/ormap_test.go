@@ -407,6 +407,134 @@ func TestMergeEmptyIntoPopulated(t *testing.T) {
 	c.Assert(a.Len(), qt.Equals, 1)
 }
 
+// --- State / FromCausal round-trip ---
+
+func TestStateFromCausalRoundTrip(t *testing.T) {
+	c := qt.New(t)
+	a := newSetMap("a")
+	a.Apply("x", addDot)
+	a.Apply("y", addDot)
+
+	state := a.State()
+	b := FromCausal(state, joinDotSet, dotcontext.NewDotSet)
+
+	c.Assert(b.Has("x"), qt.IsTrue)
+	c.Assert(b.Has("y"), qt.IsTrue)
+	c.Assert(b.Len(), qt.Equals, 2)
+}
+
+func TestFromCausalDeltaMerge(t *testing.T) {
+	c := qt.New(t)
+	a := newSetMap("a")
+	delta := a.Apply("x", addDot)
+
+	reconstructed := FromCausal(delta.State(), joinDotSet, dotcontext.NewDotSet)
+
+	b := newSetMap("b")
+	b.Merge(reconstructed)
+
+	c.Assert(b.Has("x"), qt.IsTrue)
+	c.Assert(b.Len(), qt.Equals, 1)
+}
+
+// --- Nested ORMap (ORMap[string, *DotMap[string, *DotSet]]) ---
+
+func joinNestedDotMap(
+	a, b dotcontext.Causal[*dotcontext.DotMap[string, *dotcontext.DotSet]],
+) dotcontext.Causal[*dotcontext.DotMap[string, *dotcontext.DotSet]] {
+	return dotcontext.JoinDotMap(a, b, joinDotSet, dotcontext.NewDotSet)
+}
+
+func newNestedMap(id dotcontext.ReplicaID) *ORMap[string, *dotcontext.DotMap[string, *dotcontext.DotSet]] {
+	return New[string, *dotcontext.DotMap[string, *dotcontext.DotSet]](
+		id,
+		joinNestedDotMap,
+		func() *dotcontext.DotMap[string, *dotcontext.DotSet] {
+			return dotcontext.NewDotMap[string, *dotcontext.DotSet]()
+		},
+	)
+}
+
+func TestNestedORMapConcurrentApply(t *testing.T) {
+	c := qt.New(t)
+	a := newNestedMap("a")
+	b := newNestedMap("b")
+
+	// a adds sub-key "file1" under key "dir".
+	da := a.Apply("dir", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotMap[string, *dotcontext.DotSet], delta *dotcontext.DotMap[string, *dotcontext.DotSet]) {
+		d := ctx.Next(id)
+		ds, ok := v.Get("file1")
+		if !ok {
+			ds = dotcontext.NewDotSet()
+			v.Set("file1", ds)
+		}
+		ds.Add(d)
+		deltaDS := dotcontext.NewDotSet()
+		deltaDS.Add(d)
+		delta.Set("file1", deltaDS)
+	})
+
+	// b concurrently adds sub-key "file2" under the same key "dir".
+	db := b.Apply("dir", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotMap[string, *dotcontext.DotSet], delta *dotcontext.DotMap[string, *dotcontext.DotSet]) {
+		d := ctx.Next(id)
+		ds, ok := v.Get("file2")
+		if !ok {
+			ds = dotcontext.NewDotSet()
+			v.Set("file2", ds)
+		}
+		ds.Add(d)
+		deltaDS := dotcontext.NewDotSet()
+		deltaDS.Add(d)
+		delta.Set("file2", deltaDS)
+	})
+
+	a.Merge(db)
+	b.Merge(da)
+
+	// Both should have "dir" with sub-keys "file1" and "file2".
+	for _, m := range []*ORMap[string, *dotcontext.DotMap[string, *dotcontext.DotSet]]{a, b} {
+		v, ok := m.Get("dir")
+		c.Assert(ok, qt.IsTrue)
+		_, hasFile1 := v.Get("file1")
+		_, hasFile2 := v.Get("file2")
+		c.Assert(hasFile1, qt.IsTrue)
+		c.Assert(hasFile2, qt.IsTrue)
+	}
+}
+
+func TestNestedORMapRemoveKeyPreservesOthers(t *testing.T) {
+	c := qt.New(t)
+	a := newNestedMap("a")
+	b := newNestedMap("b")
+
+	applyFile := func(key, subKey string) func(dotcontext.ReplicaID, *dotcontext.CausalContext, *dotcontext.DotMap[string, *dotcontext.DotSet], *dotcontext.DotMap[string, *dotcontext.DotSet]) {
+		return func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotMap[string, *dotcontext.DotSet], delta *dotcontext.DotMap[string, *dotcontext.DotSet]) {
+			d := ctx.Next(id)
+			ds, ok := v.Get(subKey)
+			if !ok {
+				ds = dotcontext.NewDotSet()
+				v.Set(subKey, ds)
+			}
+			ds.Add(d)
+			deltaDS := dotcontext.NewDotSet()
+			deltaDS.Add(d)
+			delta.Set(subKey, deltaDS)
+		}
+	}
+
+	d1 := a.Apply("dir1", applyFile("dir1", "f"))
+	d2 := a.Apply("dir2", applyFile("dir2", "f"))
+	b.Merge(d1)
+	b.Merge(d2)
+
+	// Remove dir1 — dir2 should survive.
+	rmDelta := a.Remove("dir1")
+	b.Merge(rmDelta)
+
+	c.Assert(b.Has("dir1"), qt.IsFalse)
+	c.Assert(b.Has("dir2"), qt.IsTrue)
+}
+
 // --- Apply with supersede (replace pattern) ---
 
 func TestApplySupersede(t *testing.T) {
