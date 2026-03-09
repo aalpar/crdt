@@ -6,7 +6,7 @@ The previous chapters covered the algebra: dots, contexts, stores, and
 joins. All of that works in memory on a single machine. Now we need to
 get deltas from one replica to another.
 
-The replication pipeline has four stages:
+The replication pipeline has five stages:
 
 ```
 mutate → buffer delta → compute what's missing → ship → merge → ack → GC
@@ -293,10 +293,16 @@ remove deltas can't be indexed in the `DeltaStore` (which indexes by
 the creating dot).
 
 In the current design, remove information propagates via full-state
-sync or by being embedded in subsequent add deltas. When a replica
-removes an element and later adds a new one, the add delta's context
-carries both the new dot and any old dots — effectively piggybacking
-the removal information.
+sync. When two replicas exchange complete `Causal` values (store +
+context), the absence of a dot from the store combined with its
+presence in the context correctly signals removal to the join
+function.
+
+Note: some CRDTs (LWWRegister, PNCounter) naturally embed removal
+information in their add deltas — `Set` and `Increment` include old
+superseded dots in the delta's context alongside the new dot. But
+AWSet's `Add` delta contains only the new dot in its context, so
+AWSet remove information does not piggyback on subsequent adds.
 
 For systems that need standalone remove propagation, the delta can be
 encoded and sent directly over the wire (the codec handles empty

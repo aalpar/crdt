@@ -40,10 +40,13 @@ type Dot struct {
 }
 ```
 
-Every Add, Remove, Set, Increment — every operation that changes state —
-generates a new dot. The dot is the *event identity*. It tells you: this
-specific mutation happened on this specific replica at this specific point
-in its history.
+Every operation that *introduces* new state — Add, Set, Increment,
+Enable — generates a new dot. Operations that only *remove* state
+(Remove, Disable) do not generate dots; they record existing dots in
+the delta's causal context to signal "I saw these and removed them."
+
+The dot is the *event identity*. It tells you: this specific mutation
+happened on this specific replica at this specific point in its history.
 
 Now the merge function has what it needs. Instead of "the set contains
 bread," we have "the set contains bread *witnessed by dot (bob, 3)*."

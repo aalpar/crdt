@@ -89,10 +89,12 @@ type DotStore interface {
 }
 ```
 
-`Dots()` returns all active dots in the store. This is how the join
-functions inspect a store's contents: they iterate the dots and check
-each one against the other side's causal context to decide what
-survives.
+`Dots()` returns all active dots in the store. The join functions
+don't use `Dots()` for their main iteration — they call `Range()`
+on each store type directly, which is more efficient. But `Dots()`
+serves a critical role in `JoinDotMap`: after recursively joining a
+key's value, `joined.Store.Dots().Len() > 0` determines whether the
+key survives or gets dropped.
 
 ## Causal: The Unit of Replication
 
