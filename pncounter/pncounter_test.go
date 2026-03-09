@@ -150,6 +150,33 @@ func TestDeltaSupersedes(t *testing.T) {
 	c.Assert(b.Value(), qt.Equals, int64(10))
 }
 
+// --- State / FromCausal round-trip ---
+
+func TestStateFromCausalRoundTrip(t *testing.T) {
+	c := qt.New(t)
+	a := New("a")
+	a.Increment(5)
+	a.Increment(3)
+
+	state := a.State()
+	b := FromCausal(state)
+
+	c.Assert(b.Value(), qt.Equals, int64(8))
+}
+
+func TestFromCausalDeltaMerge(t *testing.T) {
+	c := qt.New(t)
+	a := New("a")
+	delta := a.Increment(7)
+
+	reconstructed := FromCausal(delta.State())
+
+	b := New("b")
+	b.Merge(reconstructed)
+
+	c.Assert(b.Value(), qt.Equals, int64(7))
+}
+
 // --- Three-replica convergence ---
 
 func TestThreeReplicaConvergence(t *testing.T) {
@@ -256,7 +283,7 @@ func TestOneDotPerReplica(t *testing.T) {
 	r.Decrement(1)
 
 	count := 0
-	r.state.Store.Range(func(_ dotcontext.Dot, _ counterValue) bool {
+	r.state.Store.Range(func(_ dotcontext.Dot, _ CounterValue) bool {
 		count++
 		return true
 	})
@@ -276,7 +303,7 @@ func TestIncrementReplacesOnlyOwnDot(t *testing.T) {
 
 	// a's store should have exactly two dots: one per replica.
 	count := 0
-	a.state.Store.Range(func(_ dotcontext.Dot, _ counterValue) bool {
+	a.state.Store.Range(func(_ dotcontext.Dot, _ CounterValue) bool {
 		count++
 		return true
 	})
@@ -286,7 +313,7 @@ func TestIncrementReplacesOnlyOwnDot(t *testing.T) {
 	// Incrementing a should replace only a's dot, not b's.
 	a.Increment(5)
 	count = 0
-	a.state.Store.Range(func(_ dotcontext.Dot, _ counterValue) bool {
+	a.state.Store.Range(func(_ dotcontext.Dot, _ CounterValue) bool {
 		count++
 		return true
 	})

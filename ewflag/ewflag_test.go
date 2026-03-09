@@ -261,6 +261,32 @@ func TestDisableNoOpDeltaMerge(t *testing.T) {
 	c.Assert(b.Value(), qt.IsTrue)
 }
 
+// --- State / FromCausal round-trip ---
+
+func TestStateFromCausalRoundTrip(t *testing.T) {
+	c := qt.New(t)
+	a := New("a")
+	a.Enable()
+
+	state := a.State()
+	b := FromCausal(state)
+
+	c.Assert(b.Value(), qt.IsTrue)
+}
+
+func TestFromCausalDeltaMerge(t *testing.T) {
+	c := qt.New(t)
+	a := New("a")
+	delta := a.Enable()
+
+	reconstructed := FromCausal(delta.State())
+
+	b := New("b")
+	b.Merge(reconstructed)
+
+	c.Assert(b.Value(), qt.IsTrue)
+}
+
 // --- Three-replica convergence ---
 
 func TestThreeReplicaConvergence(t *testing.T) {

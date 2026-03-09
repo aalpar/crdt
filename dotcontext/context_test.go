@@ -391,6 +391,24 @@ func TestCausalContextCompactNoOutliers(t *testing.T) {
 	c.Assert(cc.Max("a"), qt.Equals, uint64(2))
 }
 
+func TestCausalContextCompactIdempotent(t *testing.T) {
+	c := qt.New(t)
+	cc := New()
+	cc.Next("a")
+	cc.Next("a")
+	cc.Add(Dot{ID: "a", Seq: 5}) // outlier
+	cc.Add(Dot{ID: "b", Seq: 3}) // outlier
+
+	cc.Compact()
+	snapshot := cc.Clone()
+
+	cc.Compact() // second call should be a no-op
+	c.Assert(cc.Max("a"), qt.Equals, snapshot.Max("a"))
+	c.Assert(cc.Max("b"), qt.Equals, snapshot.Max("b"))
+	c.Assert(cc.Has(Dot{ID: "a", Seq: 5}), qt.Equals, snapshot.Has(Dot{ID: "a", Seq: 5}))
+	c.Assert(cc.Has(Dot{ID: "b", Seq: 3}), qt.Equals, snapshot.Has(Dot{ID: "b", Seq: 3}))
+}
+
 // --- ReplicaIDs ---
 
 func TestCausalContextReplicaIDs(t *testing.T) {

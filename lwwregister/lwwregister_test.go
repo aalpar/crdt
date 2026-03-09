@@ -310,7 +310,7 @@ func TestOverwriteCleansStore(t *testing.T) {
 
 	// Store should have exactly one dot, not three.
 	count := 0
-	r.state.Store.Range(func(_ dotcontext.Dot, _ timestamped[string]) bool {
+	r.state.Store.Range(func(_ dotcontext.Dot, _ Timestamped[string]) bool {
 		count++
 		return true
 	})
@@ -373,6 +373,38 @@ func TestMergeEmptyIntoSet(t *testing.T) {
 	c.Assert(ok, qt.IsTrue)
 	c.Assert(v, qt.Equals, "hello")
 	c.Assert(ts, qt.Equals, int64(5))
+}
+
+// --- State / FromCausal round-trip ---
+
+func TestStateFromCausalRoundTrip(t *testing.T) {
+	c := qt.New(t)
+	a := New[string]("a")
+	a.Set("hello", 5)
+
+	state := a.State()
+	b := FromCausal[string](state)
+
+	v, ts, ok := b.Value()
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v, qt.Equals, "hello")
+	c.Assert(ts, qt.Equals, int64(5))
+}
+
+func TestFromCausalDeltaMerge(t *testing.T) {
+	c := qt.New(t)
+	a := New[string]("a")
+	delta := a.Set("x", 10)
+
+	reconstructed := FromCausal[string](delta.State())
+
+	b := New[string]("b")
+	b.Merge(reconstructed)
+
+	v, ts, ok := b.Value()
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v, qt.Equals, "x")
+	c.Assert(ts, qt.Equals, int64(10))
 }
 
 // --- Three-replica convergence ---

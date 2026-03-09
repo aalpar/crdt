@@ -69,6 +69,17 @@ func (p *EWFlag) Value() bool {
 	return p.state.Store.Len() > 0
 }
 
+// State returns the EWFlag's internal Causal state for serialization.
+func (p *EWFlag) State() dotcontext.Causal[*dotcontext.DotSet] {
+	return p.state
+}
+
+// FromCausal constructs an EWFlag from a decoded Causal value.
+// Used to reconstruct deltas from the wire for merging.
+func FromCausal(state dotcontext.Causal[*dotcontext.DotSet]) *EWFlag {
+	return &EWFlag{state: state}
+}
+
 // Merge incorporates a delta or full state from another EWFlag.
 func (p *EWFlag) Merge(other *EWFlag) {
 	p.state = dotcontext.JoinDotSet(p.state, other.state)

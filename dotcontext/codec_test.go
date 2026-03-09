@@ -511,6 +511,38 @@ func TestDotFunCodecMultiFieldPreservesJoin(t *testing.T) {
 	c.Assert(v2.ts, qt.Equals, v.ts)
 }
 
+// --- maxDecodeLen boundary ---
+
+func TestDecodeRejectsOversizedLength(t *testing.T) {
+	c := qt.New(t)
+
+	// Encode a uint64 length that exceeds maxDecodeLen, followed by
+	// enough padding that the decoder reaches the length check.
+	var buf bytes.Buffer
+	Uint64Codec{}.Encode(&buf, maxDecodeLen+1)
+
+	// Each decoder that uses a length prefix should reject this.
+	_, err := (DotSetCodec{}).Decode(bytes.NewReader(buf.Bytes()))
+	c.Assert(err, qt.IsNotNil)
+	c.Assert(err.Error(), qt.Matches, `.*exceeds max.*`)
+
+	_, err = (StringCodec{}).Decode(bytes.NewReader(buf.Bytes()))
+	c.Assert(err, qt.IsNotNil)
+	c.Assert(err.Error(), qt.Matches, `.*exceeds max.*`)
+
+	_, err = (CausalContextCodec{}).Decode(bytes.NewReader(buf.Bytes()))
+	c.Assert(err, qt.IsNotNil)
+	c.Assert(err.Error(), qt.Matches, `.*exceeds max.*`)
+
+	_, err = (MissingCodec{}).Decode(bytes.NewReader(buf.Bytes()))
+	c.Assert(err, qt.IsNotNil)
+	c.Assert(err.Error(), qt.Matches, `.*exceeds max.*`)
+
+	_, err = (DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}).Decode(bytes.NewReader(buf.Bytes()))
+	c.Assert(err, qt.IsNotNil)
+	c.Assert(err.Error(), qt.Matches, `.*exceeds max.*`)
+}
+
 // --- Fuzz targets ---
 
 func FuzzDecodeDotSet(f *testing.F) {
