@@ -1,6 +1,7 @@
 package dotcontext
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -135,8 +136,8 @@ func equalContext(a, b *CausalContext) bool {
 	if len(a.outliers) != len(b.outliers) {
 		return false
 	}
-	for d := range a.outliers {
-		if _, ok := b.outliers[d]; !ok {
+	for id, aSeqs := range a.outliers {
+		if !slices.Equal(aSeqs, b.outliers[id]) {
 			return false
 		}
 	}

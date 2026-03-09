@@ -1,20 +1,24 @@
 package dotcontext
 
-import "sort"
+import (
+	"slices"
+	"sort"
+)
 
 // CausalContext is a compressed representation of a set of observed dots.
 // It combines a version vector (replica → max contiguous sequence number)
-// with a set of outlier dots above the contiguous frontier.
+// with per-replica sorted slices of outlier sequence numbers above the
+// contiguous frontier.
 type CausalContext struct {
 	vv       map[ReplicaID]uint64
-	outliers map[Dot]struct{}
+	outliers map[ReplicaID][]uint64
 }
 
 // New returns an empty CausalContext.
 func New() *CausalContext {
 	q := &CausalContext{
 		vv:       make(map[ReplicaID]uint64),
-		outliers: make(map[Dot]struct{}),
+		outliers: make(map[ReplicaID][]uint64),
 	}
 	return q
 }
@@ -24,8 +28,8 @@ func (p *CausalContext) Has(d Dot) bool {
 	if d.Seq <= p.vv[d.ID] {
 		return true
 	}
-	_, ok := p.outliers[d]
-	return ok
+	_, found := slices.BinarySearch(p.outliers[d.ID], d.Seq)
+	return found
 }
 
 // Next returns the next dot for the given replica and adds it to the context.
@@ -39,10 +43,8 @@ func (p *CausalContext) Next(id ReplicaID) Dot {
 // This includes outliers.
 func (p *CausalContext) Max(id ReplicaID) uint64 {
 	max := p.vv[id]
-	for d := range p.outliers {
-		if d.ID == id && d.Seq > max {
-			max = d.Seq
-		}
+	if seqs := p.outliers[id]; len(seqs) > 0 && seqs[len(seqs)-1] > max {
+		max = seqs[len(seqs)-1]
 	}
 	return max
 }
@@ -55,7 +57,11 @@ func (p *CausalContext) Add(d Dot) {
 	if d.Seq == p.vv[d.ID]+1 {
 		p.vv[d.ID] = d.Seq
 	} else if d.Seq > p.vv[d.ID] {
-		p.outliers[d] = struct{}{}
+		seqs := p.outliers[d.ID]
+		i, found := slices.BinarySearch(seqs, d.Seq)
+		if !found {
+			p.outliers[d.ID] = slices.Insert(seqs, i, d.Seq)
+		}
 	}
 }
 
@@ -66,33 +72,42 @@ func (p *CausalContext) Merge(other *CausalContext) {
 			p.vv[id] = seq
 		}
 	}
-	for d := range other.outliers {
-		if !p.Has(d) {
-			p.outliers[d] = struct{}{}
+	for id, otherSeqs := range other.outliers {
+		frontier := p.vv[id]
+		for _, seq := range otherSeqs {
+			if seq <= frontier {
+				continue
+			}
+			seqs := p.outliers[id]
+			i, found := slices.BinarySearch(seqs, seq)
+			if !found {
+				p.outliers[id] = slices.Insert(seqs, i, seq)
+			}
 		}
 	}
 }
 
 // Compact cleans up the outlier set: outliers at or below the version
 // vector frontier are removed as redundant, and outliers contiguous
-// with the frontier are promoted into the version vector. This repeats
-// until no more changes occur. Call after batching multiple Add or
-// Merge operations.
+// with the frontier are promoted into the version vector. Call after
+// batching multiple Add or Merge operations.
 func (p *CausalContext) Compact() {
-	changed := true
-	for changed {
-		changed = false
-		for d := range p.outliers {
-			if d.Seq <= p.vv[d.ID] {
-				// Redundant: already covered by version vector.
-				delete(p.outliers, d)
-				changed = true
-			} else if d.Seq == p.vv[d.ID]+1 {
-				// Contiguous: promote into version vector.
-				p.vv[d.ID] = d.Seq
-				delete(p.outliers, d)
-				changed = true
-			}
+	for id, seqs := range p.outliers {
+		frontier := p.vv[id]
+		// Skip outliers at or below the frontier (redundant).
+		start := sort.Search(len(seqs), func(i int) bool { return seqs[i] > frontier })
+		// Promote contiguous outliers into the version vector.
+		for start < len(seqs) && seqs[start] == frontier+1 {
+			frontier++
+			start++
+		}
+		if frontier > p.vv[id] {
+			p.vv[id] = frontier
+		}
+		if start >= len(seqs) {
+			delete(p.outliers, id)
+		} else {
+			p.outliers[id] = seqs[start:]
 		}
 	}
 }
@@ -104,8 +119,8 @@ func (p *CausalContext) ReplicaIDs() []ReplicaID {
 	for id := range p.vv {
 		seen[id] = struct{}{}
 	}
-	for d := range p.outliers {
-		seen[d.ID] = struct{}{}
+	for id := range p.outliers {
+		seen[id] = struct{}{}
 	}
 	ids := make([]ReplicaID, 0, len(seen))
 	for id := range seen {
@@ -118,13 +133,13 @@ func (p *CausalContext) ReplicaIDs() []ReplicaID {
 func (p *CausalContext) Clone() *CausalContext {
 	cc := &CausalContext{
 		vv:       make(map[ReplicaID]uint64, len(p.vv)),
-		outliers: make(map[Dot]struct{}, len(p.outliers)),
+		outliers: make(map[ReplicaID][]uint64, len(p.outliers)),
 	}
 	for id, seq := range p.vv {
 		cc.vv[id] = seq
 	}
-	for d := range p.outliers {
-		cc.outliers[d] = struct{}{}
+	for id, seqs := range p.outliers {
+		cc.outliers[id] = slices.Clone(seqs)
 	}
 	return cc
 }
@@ -143,20 +158,18 @@ func (p *CausalContext) Missing(remote *CausalContext) map[ReplicaID][]SeqRange 
 		}
 		lo := localSeq + 1
 
-		// Collect local outliers for this replica within [lo, remoteSeq].
-		var holes []uint64
-		for d := range p.outliers {
-			if d.ID == id && d.Seq >= lo && d.Seq <= remoteSeq {
-				holes = append(holes, d.Seq)
-			}
-		}
+		// Local outliers for this replica within [lo, remoteSeq].
+		// Already sorted — no sort needed.
+		localOutliers := p.outliers[id]
+		startIdx := sort.Search(len(localOutliers), func(i int) bool { return localOutliers[i] >= lo })
+		endIdx := sort.Search(len(localOutliers), func(i int) bool { return localOutliers[i] > remoteSeq })
+		holes := localOutliers[startIdx:endIdx]
 
 		if len(holes) == 0 {
 			q[id] = append(q[id], SeqRange{Lo: lo, Hi: remoteSeq})
 			continue
 		}
 
-		sort.Slice(holes, func(i, j int) bool { return holes[i] < holes[j] })
 		cursor := lo
 		for _, h := range holes {
 			if h > cursor {
@@ -170,9 +183,11 @@ func (p *CausalContext) Missing(remote *CausalContext) map[ReplicaID][]SeqRange 
 	}
 
 	// Phase 2: remote outliers not observed locally.
-	for d := range remote.outliers {
-		if !p.Has(d) {
-			q[d.ID] = append(q[d.ID], SeqRange{Lo: d.Seq, Hi: d.Seq})
+	for id, seqs := range remote.outliers {
+		for _, seq := range seqs {
+			if !p.Has(Dot{ID: id, Seq: seq}) {
+				q[id] = append(q[id], SeqRange{Lo: seq, Hi: seq})
+			}
 		}
 	}
 

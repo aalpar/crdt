@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"slices"
 )
 
 // maxDecodeLen caps the element count or byte length that any decoder will
@@ -108,14 +109,20 @@ func (CausalContextCodec) Encode(w io.Writer, cc *CausalContext) error {
 			return err
 		}
 	}
-	// Outliers
-	if err := (Uint64Codec{}).Encode(w, uint64(len(cc.outliers))); err != nil {
+	// Outliers — count total across all replicas, emit as Dots.
+	var total int
+	for _, seqs := range cc.outliers {
+		total += len(seqs)
+	}
+	if err := (Uint64Codec{}).Encode(w, uint64(total)); err != nil {
 		return err
 	}
 	dc := DotCodec{}
-	for d := range cc.outliers {
-		if err := dc.Encode(w, d); err != nil {
-			return err
+	for id, seqs := range cc.outliers {
+		for _, seq := range seqs {
+			if err := dc.Encode(w, Dot{ID: id, Seq: seq}); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -156,7 +163,11 @@ func (CausalContextCodec) Decode(r io.Reader) (*CausalContext, error) {
 		if err != nil {
 			return nil, err
 		}
-		cc.outliers[d] = struct{}{}
+		seqs := cc.outliers[d.ID]
+		j, found := slices.BinarySearch(seqs, d.Seq)
+		if !found {
+			cc.outliers[d.ID] = slices.Insert(seqs, j, d.Seq)
+		}
 	}
 	return cc, nil
 }

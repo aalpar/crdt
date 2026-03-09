@@ -27,7 +27,7 @@
 
 ## Optimization
 
-- [ ] `Compact()` is O(n²) — fixed-point loop iterates all outliers per pass, needs up to n passes. Sorted-insert approach could bring to O(n log n). (10→1.3µs, 100→57µs, 1000→5ms)
+- [x] `Compact()` was O(n²) — changed outliers from `map[Dot]struct{}` to `map[ReplicaID][]uint64` (sorted slices). Compact is now O(n), Max is O(1). (1000 outliers: 5ms→63µs, 76x speedup)
 - [ ] `JoinDotMap` at 1000 keys allocates 16K objects — each key clones DotSets for the join formula
 
 ## Infrastructure
