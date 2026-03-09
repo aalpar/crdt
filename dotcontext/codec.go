@@ -386,8 +386,8 @@ func (MissingCodec) Decode(r io.Reader) (map[ReplicaID][]SeqRange, error) {
 // DeltaBatchCodec encodes a batch of (Dot, T) pairs as:
 // [uint64: count] ([Dot] [T: via delta codec])*
 //
-// This is the wire format for shipping deltas over TCP. The delta codec
-// is caller-supplied, same pattern as DotFunCodec.
+// This is the wire format for shipping deltas between replicas. The
+// delta codec is caller-supplied, same pattern as DotFunCodec.
 type DeltaBatchCodec[T any] struct {
 	DeltaCodec Codec[T]
 }

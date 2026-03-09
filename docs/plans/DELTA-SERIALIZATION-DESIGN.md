@@ -68,6 +68,9 @@ In `dotcontext/codec.go`:
 | DotSetCodec | *DotSet | Same-package access to dots map |
 | DotFunCodec[V] | *DotFun[V] | Takes ValueCodec Codec[V] |
 | DotMapCodec[K,V] | *DotMap[K,V] | Takes KeyCodec + ValueCodec |
+| SeqRangeCodec | SeqRange | Primitive (two uint64s) |
+| MissingCodec | map[ReplicaID][]SeqRange | For Missing() results |
+| DeltaBatchCodec[T] | map[Dot]T | Takes DeltaCodec Codec[T] |
 | CausalCodec[T] | Causal[T] | Takes StoreCodec Codec[T] |
 
 Tessera composes these for its concrete types:

@@ -1,7 +1,7 @@
 package dotcontext
 
 // DotMap maps keys to nested dot stores: K → V where V is a DotStore.
-// Used by awset (DotMap[string, *DotSet]) and ORMap.
+// Used by awset (DotMap[E, *DotSet]) and ORMap.
 type DotMap[K comparable, V DotStore] struct {
 	entries map[K]V
 }
@@ -52,7 +52,7 @@ func (p *DotMap[K, V]) Keys() []K {
 }
 
 // Clone returns a shallow copy of the DotMap. Keys are copied but nested
-// DotStore values are shared (same behavior as DotFun.Clone).
+// DotStore values are shared.
 func (p *DotMap[K, V]) Clone() *DotMap[K, V] {
 	dm := &DotMap[K, V]{entries: make(map[K]V, len(p.entries))}
 	for k, v := range p.entries {

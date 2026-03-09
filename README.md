@@ -107,8 +107,8 @@ Each CRDT wraps a `Causal[T]` and delegates conflict resolution to the join func
 |------|---------------|---------------|
 | `AWSet` | `DotMap[E, *DotSet]` | Concurrent add+remove → add wins |
 | `EWFlag` | `*DotSet` | Concurrent enable+disable → enable wins |
-| `LWWRegister` | `DotFun[timestamped[V]]` | Highest timestamp wins, tiebreak by replica ID |
-| `Counter` | `DotFun[counterValue]` | Sum of per-replica contributions |
+| `LWWRegister` | `DotFun[Timestamped[V]]` | Highest timestamp wins, tiebreak by replica ID |
+| `Counter` | `DotFun[CounterValue]` | Sum of per-replica contributions |
 | `ORMap` | `DotMap[K, V DotStore]` | Add-wins keys, recursive value merge |
 
 ### Delta Mutator Pattern

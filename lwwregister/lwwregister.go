@@ -6,9 +6,9 @@ import (
 
 // Timestamped pairs a value with a wall-clock or logical timestamp.
 // It implements dotcontext.Lattice: join picks the later timestamp.
-// In practice, JoinDotFun only calls Join when both sides have the
-// same dot — which means the same event, so values are identical and
-// the choice is trivially correct.
+// Under normal operation, JoinDotFun only calls Join when both sides
+// share the same dot, meaning the values should be identical. The
+// timestamp comparison provides a deterministic fallback if they differ.
 type Timestamped[V any] struct {
 	Value V
 	Ts    int64
@@ -90,7 +90,7 @@ func (p *LWWRegister[V]) Set(value V, timestamp int64) *LWWRegister[V] {
 // Value returns the current value, its timestamp, and whether the
 // register has been set. If multiple dots exist (concurrent writes),
 // the entry with the highest timestamp wins; ties are broken by
-// replica ID (lexicographic, higher wins) for determinism.
+// the dot's replica ID (lexicographic, higher wins) for determinism.
 func (p *LWWRegister[V]) Value() (V, int64, bool) {
 	var bestDot dotcontext.Dot
 	var best Timestamped[V]

@@ -38,12 +38,15 @@ func New[K comparable, V dotcontext.DotStore](
 // Apply mutates the value at key and returns a delta for replication.
 //
 // fn receives the replica ID, the ORMap's causal context for dot
-// generation, the current value at key (mutate in place), and a
+// generation, the current value at key (mutate in place; if the key
+// does not yet exist, v is a new empty value via emptyV), and a
 // fresh delta value to populate with just the delta entries.
 //
 // fn must:
 //   - Generate dots via ctx.Next(id)
 //   - Add new dots/entries to BOTH v (local state) and delta
+//     (the delta store is NOT derived automatically — fn must
+//     write to it explicitly)
 //   - To supersede old entries: remove them from v (the diff is
 //     captured automatically in the delta's context)
 //
@@ -138,7 +141,8 @@ func (p *ORMap[K, V]) Len() int {
 	return p.state.Store.Len()
 }
 
-// Context returns the ORMap's causal context.
+// Context returns the ORMap's causal context. Callers need this to
+// allocate dots when building fn callbacks for Apply.
 func (p *ORMap[K, V]) Context() *dotcontext.CausalContext {
 	return p.state.Context
 }

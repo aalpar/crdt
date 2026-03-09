@@ -8,7 +8,7 @@
 - [x] `JoinDotFun`, `JoinDotMap` — lattice join, recursive join with callback
 - [x] `CausalContext.ReplicaIDs` accessor
 
-108 tests passing across all packages (includes semilattice property checks, fuzz seed corpus).
+462 tests passing across all packages (includes semilattice property checks, fuzz seed corpus).
 
 ## Higher-level CRDTs (compose dotcontext)
 
@@ -37,6 +37,6 @@
 - [x] Fuzz targets for join functions (found + fixed 2 bugs)
 - [x] Benchmarks for CausalContext operations at scale
 - [x] Makefile with build, test, bench, fuzz, lint, release targets
-- [ ] README.md with usage examples
+- [x] README.md with usage examples
 - [ ] CI: run fuzz with `-fuzztime` budget on schedule (not per-push)
-- [ ] `go doc` comments on all exported types and functions
+- [x] `go doc` comments on all exported types and functions

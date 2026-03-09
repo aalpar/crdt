@@ -29,9 +29,10 @@ func New[E comparable](replicaID dotcontext.ReplicaID) *AWSet[E] {
 // Add inserts elem into the set and returns a delta for replication.
 //
 // A new dot is generated and added directly to the local state.
-// We do not self-merge the delta because Next() already advances the
-// causal context — merging back would see the dot in both contexts
-// but not in the store, incorrectly treating it as removed.
+// We do not self-merge the delta because the local state is mutated
+// directly (Next advances the context, and the dot is added to the
+// store). Merging back is unnecessary and would violate the delta-state
+// protocol: deltas are meant for remote replicas only.
 func (p *AWSet[E]) Add(elem E) *AWSet[E] {
 	d := p.state.Context.Next(p.id)
 

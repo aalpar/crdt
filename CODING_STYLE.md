@@ -75,7 +75,7 @@ func processDataEarlyReturn(value int, settings map[string]bool) error {
 
 ## Receiver Naming
 
-All method receivers use `p`:
+Method receivers use `p` by default:
 
 ```go
 func (p *AWSet[E]) Add(elem E) *AWSet[E] { ... }
@@ -83,9 +83,10 @@ func (p *CausalContext) Next(id ReplicaID) Dot { ... }
 func (p *DotMap[K, V]) Get(k K) (V, bool) { ... }
 ```
 
+Exceptions: `DeltaStore` uses `s`, `PeerTracker` uses `t`.
+
 **Never use:**
 - Descriptive names like `this`, `self`, `receiver`
-- Type-abbreviations like `s`, `m`, `c`, `f`, `r`
 - Multi-letter names like `ctx`, `set`, `map`
 
 ## Variable Naming
@@ -129,7 +130,7 @@ func New[E comparable](replicaID ReplicaID) *AWSet[E] {
 if other, ok := v.(*DotSet); ok { ... }
 
 // Binary operation pattern
-func (p *counterValue) Join(o counterValue) counterValue { ... }
+func (p CounterValue) Join(o CounterValue) CounterValue { ... }
 
 // Iterator callback pattern
 p.dots.Range(func(d Dot) bool { ... })
@@ -359,12 +360,8 @@ if !s.Has("x") {
 
 ### Package Documentation
 
-Each package contains a `CLAUDE.md` file with:
-- Package overview
-- File listing with descriptions
-- Key types and their relationships
-- Testing instructions
-- Gotchas and common pitfalls
+Each package contains a `doc.go` file with a package-level overview
+describing the types, composition, and semantics.
 
 ## Import Organization
 

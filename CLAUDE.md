@@ -38,8 +38,8 @@ Each composes dotcontext types. Mutators return deltas for replication.
 | Package | Type | Composition | Conflict Resolution |
 |---------|------|-------------|-------------------|
 | `awset/` | `AWSet[E]` | `DotMap[E, *DotSet]` | Concurrent add+remove → add wins |
-| `lwwregister/` | `LWWRegister[V]` | `DotFun[timestamped[V]]` | Highest timestamp wins, tiebreak by replica ID |
-| `pncounter/` | `Counter` | `DotFun[counterValue]` | Sum of per-replica contributions |
+| `lwwregister/` | `LWWRegister[V]` | `DotFun[Timestamped[V]]` | Highest timestamp wins, tiebreak by replica ID |
+| `pncounter/` | `Counter` | `DotFun[CounterValue]` | Sum of per-replica contributions |
 | `ormap/` | `ORMap[K, V]` | `DotMap[K, V DotStore]` | Add-wins keys, recursive value merge |
 | `ewflag/` | `EWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → enable wins |
 
@@ -54,12 +54,13 @@ Each composes dotcontext types. Mutators return deltas for replication.
 
 | Package | Key Types | Files |
 |---------|-----------|-------|
-| `dotcontext/` | Dot, CausalContext, DotSet, DotFun, DotMap, Causal | 10 source + 8 test |
-| `awset/` | AWSet | 2 source + 1 test |
+| `dotcontext/` | Dot, CausalContext, DotSet, DotFun, DotMap, Causal | 11 source + 10 test |
+| `awset/` | AWSet | 2 source + 2 test |
 | `lwwregister/` | LWWRegister | 2 source + 1 test |
 | `pncounter/` | Counter | 2 source + 1 test |
 | `ormap/` | ORMap | 2 source + 1 test |
 | `ewflag/` | EWFlag | 2 source + 1 test |
+| `replication/` | PeerTracker, GC, WriteDeltaBatch | 4 source + 4 test |
 
 ## Testing
 

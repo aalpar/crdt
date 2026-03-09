@@ -28,7 +28,8 @@ func WriteDeltaBatch[T any](
 }
 
 // ReadDeltaBatch decodes deltas from r and calls apply for each one.
-// The apply callback is where the caller joins deltas into local state.
+// The apply callback receives the originating dot and its associated
+// delta value; this is where the caller joins deltas into local state.
 //
 // Returns the number of deltas read.
 func ReadDeltaBatch[T any](

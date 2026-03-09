@@ -57,7 +57,8 @@ func (p *DotFun[V]) Dots() *DotSet {
 	return ds
 }
 
-// Clone returns a deep copy.
+// Clone copies the map entries by value. For value-typed V this is a
+// deep copy; for pointer-typed V the values are shared.
 func (p *DotFun[V]) Clone() *DotFun[V] {
 	nf := &DotFun[V]{entries: make(map[Dot]V, len(p.entries))}
 	for d, v := range p.entries {

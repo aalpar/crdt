@@ -47,8 +47,10 @@ func (p *CausalContext) Max(id ReplicaID) uint64 {
 	return max
 }
 
-// Add records a dot as observed. If it extends the contiguous range,
-// it goes directly into the version vector. Otherwise it becomes an outlier.
+// Add records a dot as observed. If it extends the contiguous frontier,
+// it goes directly into the version vector. If it is above the frontier
+// but non-contiguous, it becomes an outlier. Dots already covered by
+// the version vector are ignored.
 func (p *CausalContext) Add(d Dot) {
 	if d.Seq == p.vv[d.ID]+1 {
 		p.vv[d.ID] = d.Seq
@@ -71,9 +73,11 @@ func (p *CausalContext) Merge(other *CausalContext) {
 	}
 }
 
-// Compact promotes outliers into the version vector when they are
-// contiguous with the current frontier. Call this after batching
-// multiple Add or Merge operations.
+// Compact cleans up the outlier set: outliers at or below the version
+// vector frontier are removed as redundant, and outliers contiguous
+// with the frontier are promoted into the version vector. This repeats
+// until no more changes occur. Call after batching multiple Add or
+// Merge operations.
 func (p *CausalContext) Compact() {
 	changed := true
 	for changed {

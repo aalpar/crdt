@@ -42,7 +42,8 @@ func (p *DotSet) Range(f func(Dot) bool) {
 	}
 }
 
-// Dots returns the set itself (DotStore implementation).
+// Dots returns a clone of this set (DotStore implementation).
+// The caller may mutate the result without affecting the original.
 func (p *DotSet) Dots() *DotSet {
 	return p.Clone()
 }

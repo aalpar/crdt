@@ -44,7 +44,10 @@ func (s *DeltaStore[T]) Dots() []Dot {
 // Fetch returns all stored deltas whose dots fall within the given ranges.
 // The input format matches Missing()'s return type for direct composability:
 //
-//	store.Fetch(local.Missing(remote))
+//	store.Fetch(remote.Missing(local))
+//
+// remote.Missing(local) returns the dots local has observed but remote
+// has not — i.e., the deltas this node should send.
 func (s *DeltaStore[T]) Fetch(missing map[ReplicaID][]SeqRange) map[Dot]T {
 	if len(missing) == 0 {
 		return nil

@@ -67,7 +67,9 @@ func JoinDotFun[V Lattice[V]](a, b Causal[*DotFun[V]]) Causal[*DotFun[V]] {
 // JoinDotMap merges two Causal[*DotMap[K,V]] values.
 // joinV is the nested join function for the value type V — the caller
 // provides it because Go generics can't dispatch recursive joins
-// through interfaces.
+// through interfaces. emptyV constructs a zero-value DotStore, used
+// when a key exists on only one side and must be joined against an
+// empty counterpart.
 func JoinDotMap[K comparable, V DotStore](
 	a, b Causal[*DotMap[K, V]],
 	joinV func(Causal[V], Causal[V]) Causal[V],

@@ -5,9 +5,9 @@ import (
 )
 
 // CounterValue holds a replica's accumulated contribution.
-// It implements dotcontext.Lattice. In practice, JoinDotFun only
-// calls Join when both sides have the same dot (same event), so
-// the values are identical and either is correct.
+// It implements dotcontext.Lattice. Under normal operation, JoinDotFun
+// only calls Join when both sides share the same dot, so values are
+// identical and either is correct. Join returns the receiver unchanged.
 type CounterValue struct {
 	N int64
 }
