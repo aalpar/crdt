@@ -12,6 +12,19 @@ import (
 // (e.g. a fuzzed uint64 that claims millions of entries).
 const maxDecodeLen = 1 << 20 // ~1 million
 
+// DecodeLimitError is returned when a length prefix in the wire format
+// exceeds maxDecodeLen. Callers can distinguish malformed-input errors
+// from I/O errors using errors.As.
+type DecodeLimitError struct {
+	Field  string // which field exceeded the limit (e.g. "string", "dot set")
+	Length uint64 // the decoded length prefix
+	Max    int    // the configured limit
+}
+
+func (e *DecodeLimitError) Error() string {
+	return fmt.Sprintf("%s length %d exceeds max %d", e.Field, e.Length, e.Max)
+}
+
 // Codec encodes/decodes values of type T to/from a binary stream.
 type Codec[T any] interface {
 	Encode(w io.Writer, v T) error
@@ -35,7 +48,7 @@ func (StringCodec) Decode(r io.Reader) (string, error) {
 		return "", err
 	}
 	if n > maxDecodeLen {
-		return "", fmt.Errorf("string length %d exceeds max %d", n, maxDecodeLen)
+		return "", &DecodeLimitError{Field: "string", Length: n, Max: maxDecodeLen}
 	}
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(r, buf); err != nil {
@@ -136,7 +149,7 @@ func (CausalContextCodec) Decode(r io.Reader) (*CausalContext, error) {
 		return nil, err
 	}
 	if vvLen > maxDecodeLen {
-		return nil, fmt.Errorf("version vector length %d exceeds max %d", vvLen, maxDecodeLen)
+		return nil, &DecodeLimitError{Field: "version vector", Length: vvLen, Max: maxDecodeLen}
 	}
 	for i := uint64(0); i < vvLen; i++ {
 		id, err := (StringCodec{}).Decode(r)
@@ -155,7 +168,7 @@ func (CausalContextCodec) Decode(r io.Reader) (*CausalContext, error) {
 		return nil, err
 	}
 	if outLen > maxDecodeLen {
-		return nil, fmt.Errorf("outlier count %d exceeds max %d", outLen, maxDecodeLen)
+		return nil, &DecodeLimitError{Field: "outlier count", Length: outLen, Max: maxDecodeLen}
 	}
 	dc := DotCodec{}
 	for i := uint64(0); i < outLen; i++ {
@@ -197,7 +210,7 @@ func (DotSetCodec) Decode(r io.Reader) (*DotSet, error) {
 		return nil, err
 	}
 	if n > maxDecodeLen {
-		return nil, fmt.Errorf("dot set length %d exceeds max %d", n, maxDecodeLen)
+		return nil, &DecodeLimitError{Field: "dot set", Length: n, Max: maxDecodeLen}
 	}
 	ds := NewDotSet()
 	dc := DotCodec{}
@@ -242,7 +255,7 @@ func (c DotFunCodec[V]) Decode(r io.Reader) (*DotFun[V], error) {
 		return nil, err
 	}
 	if n > maxDecodeLen {
-		return nil, fmt.Errorf("dot fun length %d exceeds max %d", n, maxDecodeLen)
+		return nil, &DecodeLimitError{Field: "dot fun", Length: n, Max: maxDecodeLen}
 	}
 	df := NewDotFun[V]()
 	dc := DotCodec{}
@@ -291,7 +304,7 @@ func (c DotMapCodec[K, V]) Decode(r io.Reader) (*DotMap[K, V], error) {
 		return nil, err
 	}
 	if n > maxDecodeLen {
-		return nil, fmt.Errorf("dot map length %d exceeds max %d", n, maxDecodeLen)
+		return nil, &DecodeLimitError{Field: "dot map", Length: n, Max: maxDecodeLen}
 	}
 	dm := NewDotMap[K, V]()
 	for i := uint64(0); i < n; i++ {
@@ -362,7 +375,7 @@ func (MissingCodec) Decode(r io.Reader) (map[ReplicaID][]SeqRange, error) {
 		return nil, err
 	}
 	if n > maxDecodeLen {
-		return nil, fmt.Errorf("missing map length %d exceeds max %d", n, maxDecodeLen)
+		return nil, &DecodeLimitError{Field: "missing map", Length: n, Max: maxDecodeLen}
 	}
 	if n == 0 {
 		return nil, nil
@@ -380,7 +393,7 @@ func (MissingCodec) Decode(r io.Reader) (map[ReplicaID][]SeqRange, error) {
 			return nil, err
 		}
 		if numRanges > maxDecodeLen {
-			return nil, fmt.Errorf("range count %d exceeds max %d", numRanges, maxDecodeLen)
+			return nil, &DecodeLimitError{Field: "range count", Length: numRanges, Max: maxDecodeLen}
 		}
 		ranges := make([]SeqRange, numRanges)
 		for j := uint64(0); j < numRanges; j++ {
@@ -425,7 +438,7 @@ func (c DeltaBatchCodec[T]) Decode(r io.Reader) (map[Dot]T, error) {
 		return nil, err
 	}
 	if n > maxDecodeLen {
-		return nil, fmt.Errorf("delta batch length %d exceeds max %d", n, maxDecodeLen)
+		return nil, &DecodeLimitError{Field: "delta batch", Length: n, Max: maxDecodeLen}
 	}
 	if n == 0 {
 		return nil, nil
