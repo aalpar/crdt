@@ -8,7 +8,7 @@
 - [x] `JoinDotFun`, `JoinDotMap` — lattice join, recursive join with callback
 - [x] `CausalContext.ReplicaIDs` accessor
 
-644 tests passing across all packages (includes semilattice property checks, fuzz seed corpus).
+661 tests passing across all packages (includes semilattice property checks, fuzz seed corpus).
 
 ## Higher-level CRDTs (compose dotcontext)
 
@@ -29,6 +29,7 @@
 
 - [x] `Compact()` was O(n²) — changed outliers from `map[Dot]struct{}` to `map[ReplicaID][]uint64` (sorted slices). Compact is now O(n), Max is O(1). (1000 outliers: 5ms→63µs, 76x speedup)
 - [x] `JoinDotMap` allocation reduction — split join functions into store-only variants (`JoinDotSetStore`, `JoinDotFunStore`) that skip per-key context clone/merge/compact. (1000 keys: 16K→12K allocs, 2.0MB→1.7MB, ~20% faster)
+- [x] `Merge()` O(m×n)→O(m+n) — replaced per-element BinarySearch+Insert with sorted-merge pass for outliers. (1000 interleaved outliers: 78µs→3.3µs, 23.5x)
 
 ## Infrastructure
 
@@ -40,3 +41,5 @@
 - [x] README.md with usage examples
 - [ ] CI: run fuzz with `-fuzztime` budget on schedule (not per-push)
 - [x] `go doc` comments on all exported types and functions
+- [x] `crdttest/` — shared property test harness (`Harness[T]`), eliminates ~1,700 lines of duplicated test structure across 9 CRDT packages
+- [x] Typed decode errors (`*DecodeLimitError`) — replaces `fmt.Errorf` in codec, enables `errors.As` for callers
