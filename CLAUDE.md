@@ -31,6 +31,8 @@ Join functions merge two `Causal` values (idempotent, commutative, associative):
 | `JoinDotFun` | Per-dot lattice join, unobserved dots survive |
 | `JoinDotMap` | Recursive join with caller-supplied `joinV` and `emptyV` |
 
+Each join has a store-only variant (`JoinDotSetStore`, `JoinDotFunStore`) that applies the dot formula without cloning/merging contexts. `JoinDotMap`'s `joinV` callback uses the store-only signature `func(V, V, *CausalContext, *CausalContext) V` — the context merge happens once at the DotMap level.
+
 ### Layer 2: Higher-Level CRDTs
 
 Each composes dotcontext types. Mutators return deltas for replication.
@@ -49,7 +51,8 @@ Each composes dotcontext types. Mutators return deltas for replication.
 ### Key Design Decisions
 
 - Mutators generate dots from the main `CausalContext` and mutate local state directly — no self-merge (avoids false "observed and removed" interpretation)
-- `JoinDotMap` takes `emptyV func() V` parameter (not a type switch) so it works with arbitrary `DotStore` types
+- `JoinDotMap` takes `joinV` (store-only callback) and `emptyV func() V` parameters (not type switches) so it works with arbitrary `DotStore` types
+- `CausalContext` outliers are `map[ReplicaID][]uint64` (per-replica sorted slices), not `map[Dot]struct{}`
 - `math/big` is not used here (that's the shamir project); this project uses stdlib maps throughout
 - `Compact()` removes outliers at or below the version vector frontier, not just contiguous ones
 
