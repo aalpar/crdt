@@ -73,6 +73,17 @@ func (r *MVRegister[V]) Write(v V) *MVRegister[V] {
 	}
 }
 
+// State returns the MVRegister's internal Causal state for serialization.
+func (r *MVRegister[V]) State() dotcontext.Causal[*dotcontext.DotFun[Value[V]]] {
+	return r.state
+}
+
+// FromCausal constructs an MVRegister from a decoded Causal value.
+// Used to reconstruct deltas from the wire for merging.
+func FromCausal[V any](state dotcontext.Causal[*dotcontext.DotFun[Value[V]]]) *MVRegister[V] {
+	return &MVRegister[V]{state: state}
+}
+
 // Merge incorporates a delta or full state from another register.
 func (r *MVRegister[V]) Merge(other *MVRegister[V]) {
 	r.state = dotcontext.JoinDotFun(r.state, other.state)
