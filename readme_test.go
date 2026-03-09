@@ -154,10 +154,15 @@ var assignRe = regexp.MustCompile(`^(\w+(?:\s*,\s*\w+)*)\s*:=`)
 // crdtPkgs maps short package names to their import paths within this module.
 var crdtPkgs = map[string]string{
 	"awset":       "github.com/aalpar/crdt/awset",
+	"dwflag":      "github.com/aalpar/crdt/dwflag",
 	"ewflag":      "github.com/aalpar/crdt/ewflag",
+	"gcounter":    "github.com/aalpar/crdt/gcounter",
 	"lwwregister": "github.com/aalpar/crdt/lwwregister",
-	"pncounter":   "github.com/aalpar/crdt/pncounter",
+	"mvregister":  "github.com/aalpar/crdt/mvregister",
 	"ormap":       "github.com/aalpar/crdt/ormap",
+	"pncounter":   "github.com/aalpar/crdt/pncounter",
+	"replication": "github.com/aalpar/crdt/replication",
+	"rwset":       "github.com/aalpar/crdt/rwset",
 	"dotcontext":  "github.com/aalpar/crdt/dotcontext",
 }
 

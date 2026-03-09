@@ -93,13 +93,13 @@ func JoinDotMap[K comparable, V DotStore](
 		if vb, ok := b.Store.Get(k); ok {
 			// Key in both: recursive join.
 			joined := joinV(va, vb, a.Context, b.Context)
-			if joined.Dots().Len() > 0 {
+			if joined.HasDots() {
 				result.Set(k, joined)
 			}
 		} else {
 			// Key only in a: join with empty (b's context still applies).
 			joined := joinV(va, emptyV(), a.Context, b.Context)
-			if joined.Dots().Len() > 0 {
+			if joined.HasDots() {
 				result.Set(k, joined)
 			}
 		}
@@ -112,7 +112,7 @@ func JoinDotMap[K comparable, V DotStore](
 			return true // already handled above
 		}
 		joined := joinV(emptyV(), vb, a.Context, b.Context)
-		if joined.Dots().Len() > 0 {
+		if joined.HasDots() {
 			result.Set(k, joined)
 		}
 		return true

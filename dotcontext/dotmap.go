@@ -61,6 +61,16 @@ func (p *DotMap[K, V]) Clone() *DotMap[K, V] {
 	return dm
 }
 
+// HasDots reports whether any nested store contains dots.
+func (p *DotMap[K, V]) HasDots() bool {
+	for _, v := range p.entries {
+		if v.HasDots() {
+			return true
+		}
+	}
+	return false
+}
+
 // Dots returns the union of dots across all nested stores (DotStore implementation).
 func (p *DotMap[K, V]) Dots() *DotSet {
 	ds := NewDotSet()

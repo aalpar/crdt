@@ -48,6 +48,11 @@ func (p *DotSet) Dots() *DotSet {
 	return p.Clone()
 }
 
+// HasDots reports whether the set is non-empty.
+func (p *DotSet) HasDots() bool {
+	return len(p.dots) > 0
+}
+
 // Clone returns a deep copy.
 func (p *DotSet) Clone() *DotSet {
 	ds := &DotSet{dots: make(map[Dot]struct{}, len(p.dots))}

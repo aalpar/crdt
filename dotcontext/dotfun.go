@@ -48,6 +48,11 @@ func (p *DotFun[V]) Range(fn func(Dot, V) bool) {
 	}
 }
 
+// HasDots reports whether the DotFun has any entries.
+func (p *DotFun[V]) HasDots() bool {
+	return len(p.entries) > 0
+}
+
 // Dots returns the set of dots in this DotFun (DotStore implementation).
 func (p *DotFun[V]) Dots() *DotSet {
 	ds := NewDotSet()

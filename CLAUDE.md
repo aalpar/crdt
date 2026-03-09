@@ -18,6 +18,7 @@ Zero external dependencies. All types backed by stdlib maps.
 |------|---------|
 | `Dot` | Unique event identifier (replica, seq) |
 | `CausalContext` | Compressed observed-dot set (version vector + outliers) |
+| `DotStore` | Interface: `Dots() *DotSet` + `HasDots() bool` |
 | `DotSet` | Set of dots — `P(I × N)` |
 | `DotFun[V Lattice[V]]` | Dots mapped to lattice values |
 | `DotMap[K, V DotStore]` | Keys mapped to nested dot stores |
@@ -47,6 +48,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 | `ormap/` | `ORMap[K, V]` | `DotMap[K, V DotStore]` | Add-wins keys, recursive value merge |
 | `ewflag/` | `EWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → enable wins |
 | `dwflag/` | `DWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → disable wins |
+| `mvregister/` | `MVRegister[V]` | `DotFun[Value[V]]` | All concurrent writes preserved |
 
 ### Key Design Decisions
 
@@ -69,6 +71,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 | `ormap/` | ORMap | 2 source + 1 test |
 | `ewflag/` | EWFlag | 2 source + 1 test |
 | `dwflag/` | DWFlag | 2 source + 1 test |
+| `mvregister/` | MVRegister | 2 source + 1 test |
 | `replication/` | PeerTracker, GC, WriteDeltaBatch | 4 source + 4 test |
 
 ## Testing

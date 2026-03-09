@@ -4,4 +4,5 @@ package dotcontext
 // DotSet, DotFun, and DotMap all implement this interface.
 type DotStore interface {
 	Dots() *DotSet
+	HasDots() bool
 }
