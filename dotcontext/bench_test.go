@@ -173,9 +173,6 @@ func BenchmarkJoinDotFun(b *testing.B) {
 }
 
 func BenchmarkJoinDotMap(b *testing.B) {
-	joinDS := func(x, y Causal[*DotSet]) Causal[*DotSet] {
-		return JoinDotSet(x, y)
-	}
 	for _, nKeys := range []int{10, 100, 1000} {
 		b.Run(fmt.Sprintf("keys/%d", nKeys), func(b *testing.B) {
 			makeDM := func(id ReplicaID) Causal[*DotMap[string, *DotSet]] {
@@ -203,7 +200,7 @@ func BenchmarkJoinDotMap(b *testing.B) {
 				return Causal[*DotMap[string, *DotSet]]{Store: store, Context: c.Context.Clone()}
 			}
 			for b.Loop() {
-				JoinDotMap(cloneDM(a), cloneDM(bb), joinDS, NewDotSet)
+				JoinDotMap(cloneDM(a), cloneDM(bb), JoinDotSetStore, NewDotSet)
 			}
 		})
 	}

@@ -28,7 +28,7 @@
 ## Optimization
 
 - [x] `Compact()` was O(n²) — changed outliers from `map[Dot]struct{}` to `map[ReplicaID][]uint64` (sorted slices). Compact is now O(n), Max is O(1). (1000 outliers: 5ms→63µs, 76x speedup)
-- [ ] `JoinDotMap` at 1000 keys allocates 16K objects — each key clones DotSets for the join formula
+- [x] `JoinDotMap` allocation reduction — split join functions into store-only variants (`JoinDotSetStore`, `JoinDotFunStore`) that skip per-key context clone/merge/compact. (1000 keys: 16K→12K allocs, 2.0MB→1.7MB, ~20% faster)
 
 ## Infrastructure
 

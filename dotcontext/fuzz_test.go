@@ -272,38 +272,34 @@ func FuzzJoinDotMapSemilattice(f *testing.F) {
 	f.Add([]byte{0, 0, 0, 3}, []byte{0, 0, 0, 3}, []byte{0, 0, 0, 3})
 	f.Add([]byte{0, 0, 0, 3}, []byte{1, 1, 0, 3}, []byte{2, 2, 0, 3})
 
-	joinDS := func(x, y Causal[*DotSet]) Causal[*DotSet] {
-		return JoinDotSet(x, y)
-	}
-
 	f.Fuzz(func(t *testing.T, dataA, dataB, dataC []byte) {
 		a := parseCausalDotMap(dataA)
 		b := parseCausalDotMap(dataB)
 		c := parseCausalDotMap(dataC)
 
 		// Idempotent
-		aa := JoinDotMap(cloneCausalDotMap(a), cloneCausalDotMap(a), joinDS, NewDotSet)
+		aa := JoinDotMap(cloneCausalDotMap(a), cloneCausalDotMap(a), JoinDotSetStore, NewDotSet)
 		if !equalCausalDotMap(a, aa) {
 			t.Fatal("idempotent violation")
 		}
 
 		// Commutative
-		ab := JoinDotMap(cloneCausalDotMap(a), cloneCausalDotMap(b), joinDS, NewDotSet)
-		ba := JoinDotMap(cloneCausalDotMap(b), cloneCausalDotMap(a), joinDS, NewDotSet)
+		ab := JoinDotMap(cloneCausalDotMap(a), cloneCausalDotMap(b), JoinDotSetStore, NewDotSet)
+		ba := JoinDotMap(cloneCausalDotMap(b), cloneCausalDotMap(a), JoinDotSetStore, NewDotSet)
 		if !equalCausalDotMap(ab, ba) {
 			t.Fatal("commutative violation")
 		}
 
 		// Associative
 		ab_c := JoinDotMap(
-			JoinDotMap(cloneCausalDotMap(a), cloneCausalDotMap(b), joinDS, NewDotSet),
+			JoinDotMap(cloneCausalDotMap(a), cloneCausalDotMap(b), JoinDotSetStore, NewDotSet),
 			cloneCausalDotMap(c),
-			joinDS, NewDotSet,
+			JoinDotSetStore, NewDotSet,
 		)
 		a_bc := JoinDotMap(
 			cloneCausalDotMap(a),
-			JoinDotMap(cloneCausalDotMap(b), cloneCausalDotMap(c), joinDS, NewDotSet),
-			joinDS, NewDotSet,
+			JoinDotMap(cloneCausalDotMap(b), cloneCausalDotMap(c), JoinDotSetStore, NewDotSet),
+			JoinDotSetStore, NewDotSet,
 		)
 		if !equalCausalDotMap(ab_c, a_bc) {
 			t.Fatal("associative violation")

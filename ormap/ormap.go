@@ -10,7 +10,7 @@ import (
 type ORMap[K comparable, V dotcontext.DotStore] struct {
 	id     dotcontext.ReplicaID
 	state  dotcontext.Causal[*dotcontext.DotMap[K, V]]
-	joinV  func(dotcontext.Causal[V], dotcontext.Causal[V]) dotcontext.Causal[V]
+	joinV  func(V, V, *dotcontext.CausalContext, *dotcontext.CausalContext) V
 	emptyV func() V
 }
 
@@ -20,7 +20,7 @@ type ORMap[K comparable, V dotcontext.DotStore] struct {
 // emptyV returns a new empty value of type V.
 func New[K comparable, V dotcontext.DotStore](
 	replicaID dotcontext.ReplicaID,
-	joinV func(dotcontext.Causal[V], dotcontext.Causal[V]) dotcontext.Causal[V],
+	joinV func(V, V, *dotcontext.CausalContext, *dotcontext.CausalContext) V,
 	emptyV func() V,
 ) *ORMap[K, V] {
 	q := &ORMap[K, V]{
@@ -156,7 +156,7 @@ func (p *ORMap[K, V]) State() dotcontext.Causal[*dotcontext.DotMap[K, V]] {
 // Used to reconstruct deltas from the wire for merging.
 func FromCausal[K comparable, V dotcontext.DotStore](
 	state dotcontext.Causal[*dotcontext.DotMap[K, V]],
-	joinV func(dotcontext.Causal[V], dotcontext.Causal[V]) dotcontext.Causal[V],
+	joinV func(V, V, *dotcontext.CausalContext, *dotcontext.CausalContext) V,
 	emptyV func() V,
 ) *ORMap[K, V] {
 	return &ORMap[K, V]{

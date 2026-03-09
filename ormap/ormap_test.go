@@ -11,12 +11,8 @@ import (
 
 // Helpers for ORMap[string, *DotSet] — a map of sets.
 
-func joinDotSet(a, b dotcontext.Causal[*dotcontext.DotSet]) dotcontext.Causal[*dotcontext.DotSet] {
-	return dotcontext.JoinDotSet(a, b)
-}
-
 func newSetMap(id dotcontext.ReplicaID) *ORMap[string, *dotcontext.DotSet] {
-	return New[string, *dotcontext.DotSet](id, joinDotSet, dotcontext.NewDotSet)
+	return New[string, *dotcontext.DotSet](id, dotcontext.JoinDotSetStore, dotcontext.NewDotSet)
 }
 
 func addDot(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotSet, delta *dotcontext.DotSet) {
@@ -411,7 +407,7 @@ func TestStateRoundTrip(t *testing.T) {
 		a.Apply("y", addDot)
 
 		state := a.State()
-		b := FromCausal(state, joinDotSet, dotcontext.NewDotSet)
+		b := FromCausal(state, dotcontext.JoinDotSetStore, dotcontext.NewDotSet)
 
 		c.Assert(b.Has("x"), qt.IsTrue)
 		c.Assert(b.Has("y"), qt.IsTrue)
@@ -422,7 +418,7 @@ func TestStateRoundTrip(t *testing.T) {
 		a := newSetMap("a")
 		delta := a.Apply("x", addDot)
 
-		reconstructed := FromCausal(delta.State(), joinDotSet, dotcontext.NewDotSet)
+		reconstructed := FromCausal(delta.State(), dotcontext.JoinDotSetStore, dotcontext.NewDotSet)
 
 		b := newSetMap("b")
 		b.Merge(reconstructed)
@@ -496,16 +492,22 @@ func TestConvergence(t *testing.T) {
 
 // --- Nested ORMap (ORMap[string, *DotMap[string, *DotSet]]) ---
 
-func joinNestedDotMap(
-	a, b dotcontext.Causal[*dotcontext.DotMap[string, *dotcontext.DotSet]],
-) dotcontext.Causal[*dotcontext.DotMap[string, *dotcontext.DotSet]] {
-	return dotcontext.JoinDotMap(a, b, joinDotSet, dotcontext.NewDotSet)
+func joinNestedDotMapStore(
+	a, b *dotcontext.DotMap[string, *dotcontext.DotSet],
+	ctxA, ctxB *dotcontext.CausalContext,
+) *dotcontext.DotMap[string, *dotcontext.DotSet] {
+	result := dotcontext.JoinDotMap(
+		dotcontext.Causal[*dotcontext.DotMap[string, *dotcontext.DotSet]]{Store: a, Context: ctxA},
+		dotcontext.Causal[*dotcontext.DotMap[string, *dotcontext.DotSet]]{Store: b, Context: ctxB},
+		dotcontext.JoinDotSetStore, dotcontext.NewDotSet,
+	)
+	return result.Store
 }
 
 func newNestedMap(id dotcontext.ReplicaID) *ORMap[string, *dotcontext.DotMap[string, *dotcontext.DotSet]] {
 	return New[string, *dotcontext.DotMap[string, *dotcontext.DotSet]](
 		id,
-		joinNestedDotMap,
+		joinNestedDotMapStore,
 		func() *dotcontext.DotMap[string, *dotcontext.DotSet] {
 			return dotcontext.NewDotMap[string, *dotcontext.DotSet]()
 		},
@@ -604,14 +606,14 @@ func (cv counterValue) Join(other counterValue) counterValue {
 	return cv
 }
 
-func joinDotFun(a, b dotcontext.Causal[*dotcontext.DotFun[counterValue]]) dotcontext.Causal[*dotcontext.DotFun[counterValue]] {
-	return dotcontext.JoinDotFun(a, b)
+func joinCounterValueStore(a, b *dotcontext.DotFun[counterValue], ctxA, ctxB *dotcontext.CausalContext) *dotcontext.DotFun[counterValue] {
+	return dotcontext.JoinDotFunStore(a, b, ctxA, ctxB)
 }
 
 func newCounterMap(id dotcontext.ReplicaID) *ORMap[string, *dotcontext.DotFun[counterValue]] {
 	return New[string, *dotcontext.DotFun[counterValue]](
 		id,
-		joinDotFun,
+		joinCounterValueStore,
 		dotcontext.NewDotFun[counterValue],
 	)
 }

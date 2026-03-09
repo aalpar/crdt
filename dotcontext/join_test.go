@@ -313,8 +313,6 @@ func TestJoinDotMap(t *testing.T) {
 
 	da := Dot{ID: "a", Seq: 1}
 	db := Dot{ID: "b", Seq: 1}
-	joinDS := func(x, y Causal[*DotSet]) Causal[*DotSet] { return JoinDotSet(x, y) }
-
 	type testCase struct {
 		name  string
 		a     func() Causal[*DotMap[string, *DotSet]]
@@ -456,7 +454,7 @@ func TestJoinDotMap(t *testing.T) {
 		c.Run(tc.name, func(c *qt.C) {
 			a := tc.a()
 			b := tc.b()
-			result := JoinDotMap(a, b, joinDS, NewDotSet)
+			result := JoinDotMap(a, b, JoinDotSetStore, NewDotSet)
 			tc.check(c, result)
 		})
 	}
@@ -535,7 +533,6 @@ func TestJoinDotFunAssociative(t *testing.T) {
 
 func TestJoinDotMapAssociative(t *testing.T) {
 	c := qt.New(t)
-	joinDS := func(x, y Causal[*DotSet]) Causal[*DotSet] { return JoinDotSet(x, y) }
 
 	makeSide := func(key string, d Dot, extraCtx ...Dot) Causal[*DotMap[string, *DotSet]] {
 		dm := NewDotMap[string, *DotSet]()
@@ -559,12 +556,12 @@ func TestJoinDotMapAssociative(t *testing.T) {
 	x := makeSide("y", dc)     // different key
 
 	// (a join b) join c
-	ab := JoinDotMap(a, b, joinDS, NewDotSet)
-	abc := JoinDotMap(ab, x, joinDS, NewDotSet)
+	ab := JoinDotMap(a, b, JoinDotSetStore, NewDotSet)
+	abc := JoinDotMap(ab, x, JoinDotSetStore, NewDotSet)
 
 	// a join (b join c)
-	bc := JoinDotMap(b, x, joinDS, NewDotSet)
-	abc2 := JoinDotMap(a, bc, joinDS, NewDotSet)
+	bc := JoinDotMap(b, x, JoinDotSetStore, NewDotSet)
+	abc2 := JoinDotMap(a, bc, JoinDotSetStore, NewDotSet)
 
 	// Compare keys.
 	abcKeys := abc.Store.Keys()
@@ -655,7 +652,6 @@ func TestJoinLargeStore(t *testing.T) {
 
 	c.Run("DotMap", func(c *qt.C) {
 		const n = 1000
-		joinDS := func(x, y Causal[*DotSet]) Causal[*DotSet] { return JoinDotSet(x, y) }
 
 		a := Causal[*DotMap[string, *DotSet]]{Store: NewDotMap[string, *DotSet](), Context: New()}
 		b := Causal[*DotMap[string, *DotSet]]{Store: NewDotMap[string, *DotSet](), Context: New()}
@@ -676,7 +672,7 @@ func TestJoinLargeStore(t *testing.T) {
 			b.Context.Add(db)
 		}
 
-		result := JoinDotMap(a, b, joinDS, NewDotSet)
+		result := JoinDotMap(a, b, JoinDotSetStore, NewDotSet)
 
 		// Each key should have 2 dots (one from each side).
 		c.Assert(result.Store.Len(), qt.Equals, n)

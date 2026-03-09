@@ -207,10 +207,11 @@ func FromCausal[E comparable](
 
 // Merge incorporates a delta or full state from another RWSet.
 func (p *RWSet[E]) Merge(other *RWSet[E]) {
-	p.state = dotcontext.JoinDotMap(p.state, other.state, joinPresenceFun, dotcontext.NewDotFun[Presence])
+	p.state = dotcontext.JoinDotMap(p.state, other.state, joinPresenceFunStore, dotcontext.NewDotFun[Presence])
 }
 
-// joinPresenceFun adapts JoinDotFun[Presence] to the signature required by JoinDotMap.
-func joinPresenceFun(a, b dotcontext.Causal[*dotcontext.DotFun[Presence]]) dotcontext.Causal[*dotcontext.DotFun[Presence]] {
-	return dotcontext.JoinDotFun(a, b)
+// joinPresenceFunStore is the store-only join for DotFun[Presence],
+// instantiating the generic JoinDotFunStore for use as a JoinDotMap callback.
+func joinPresenceFunStore(a, b *dotcontext.DotFun[Presence], ctxA, ctxB *dotcontext.CausalContext) *dotcontext.DotFun[Presence] {
+	return dotcontext.JoinDotFunStore(a, b, ctxA, ctxB)
 }

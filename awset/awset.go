@@ -120,10 +120,5 @@ func FromCausal[E comparable](
 
 // Merge incorporates a delta or full state from another AWSet.
 func (p *AWSet[E]) Merge(other *AWSet[E]) {
-	p.state = dotcontext.JoinDotMap(p.state, other.state, joinDotSet, dotcontext.NewDotSet)
-}
-
-// joinDotSet adapts JoinDotSet to the signature required by JoinDotMap.
-func joinDotSet(a, b dotcontext.Causal[*dotcontext.DotSet]) dotcontext.Causal[*dotcontext.DotSet] {
-	return dotcontext.JoinDotSet(a, b)
+	p.state = dotcontext.JoinDotMap(p.state, other.state, dotcontext.JoinDotSetStore, dotcontext.NewDotSet)
 }
