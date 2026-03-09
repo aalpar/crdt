@@ -151,6 +151,116 @@ func TestMergeDisableDelta(t *testing.T) {
 	c.Assert(b.Value(), qt.IsFalse)
 }
 
+// --- Merge associativity ---
+
+func TestMergeAssociative(t *testing.T) {
+	c := qt.New(t)
+	a := New("a")
+	b := New("b")
+	x := New("c")
+
+	a.Enable()
+	b.Enable()
+	b.Disable()
+	x.Enable()
+
+	// (a ⊔ b) ⊔ c
+	ab := New("ab")
+	ab.Merge(a)
+	ab.Merge(b)
+	abc := New("abc")
+	abc.Merge(ab)
+	abc.Merge(x)
+
+	// a ⊔ (b ⊔ c)
+	bc := New("bc")
+	bc.Merge(b)
+	bc.Merge(x)
+	abc2 := New("abc2")
+	abc2.Merge(a)
+	abc2.Merge(bc)
+
+	c.Assert(abc.Value(), qt.Equals, abc2.Value())
+}
+
+// --- Concurrent disables ---
+
+func TestConcurrentDisablesSameFlag(t *testing.T) {
+	c := qt.New(t)
+	a := New("a")
+	b := New("b")
+
+	// Both see enabled.
+	enableDelta := a.Enable()
+	b.Merge(enableDelta)
+
+	// Both disable concurrently.
+	disA := a.Disable()
+	disB := b.Disable()
+
+	a.Merge(disB)
+	b.Merge(disA)
+
+	c.Assert(a.Value(), qt.IsFalse)
+	c.Assert(b.Value(), qt.IsFalse)
+}
+
+// --- Enable multiple times accumulates dots ---
+
+func TestMultipleEnablesSameReplica(t *testing.T) {
+	c := qt.New(t)
+	f := New("a")
+	f.Enable()
+	f.Enable()
+	f.Enable()
+
+	c.Assert(f.Value(), qt.IsTrue)
+
+	// Three enables = three dots in the store.
+	c.Assert(f.state.Store.Len(), qt.Equals, 3)
+
+	// A single disable clears all of them.
+	f.Disable()
+	c.Assert(f.Value(), qt.IsFalse)
+	c.Assert(f.state.Store.Len(), qt.Equals, 0)
+}
+
+// --- Delta-delta merge ---
+
+func TestDeltaDeltaMerge(t *testing.T) {
+	c := qt.New(t)
+	a := New("a")
+	d1 := a.Enable()
+	d2 := a.Disable()
+	d3 := a.Enable()
+
+	// Merge deltas together, then apply combined delta.
+	d1.Merge(d2)
+	d1.Merge(d3)
+
+	b := New("b")
+	b.Merge(d1)
+
+	c.Assert(b.Value(), qt.IsTrue)
+}
+
+// --- Disable no-op delta is harmless ---
+
+func TestDisableNoOpDeltaMerge(t *testing.T) {
+	c := qt.New(t)
+	a := New("a")
+	b := New("b")
+
+	// a is disabled; its disable delta has empty context.
+	noop := a.Disable()
+
+	b.Enable()
+	b.Merge(noop)
+
+	// b's enable should survive — noop delta observes nothing.
+	c.Assert(b.Value(), qt.IsTrue)
+}
+
 // --- Three-replica convergence ---
 
 func TestThreeReplicaConvergence(t *testing.T) {
