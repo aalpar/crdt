@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	qt "github.com/frankban/quicktest"
+
+	"github.com/aalpar/crdt/dotcontext"
 )
 
 func TestNewEmpty(t *testing.T) {
@@ -206,6 +208,154 @@ func TestIntElements(t *testing.T) {
 
 	c.Assert(s.Has(42), qt.IsTrue)
 	c.Assert(s.Has(99), qt.IsFalse)
+	c.Assert(s.Len(), qt.Equals, 2)
+}
+
+// --- Merge associativity ---
+
+func TestMergeAssociative(t *testing.T) {
+	c := qt.New(t)
+	a := New[string]("a")
+	b := New[string]("b")
+	x := New[string]("c")
+
+	a.Add("x")
+	a.Add("y")
+	b.Add("y")
+	b.Add("z")
+	x.Add("x")
+	x.Remove("x")
+	x.Add("w")
+
+	// (a ⊔ b) ⊔ c
+	ab := New[string]("ab")
+	ab.Merge(a)
+	ab.Merge(b)
+	abc := New[string]("abc")
+	abc.Merge(ab)
+	abc.Merge(x)
+
+	// a ⊔ (b ⊔ c)
+	bc := New[string]("bc")
+	bc.Merge(b)
+	bc.Merge(x)
+	abc2 := New[string]("abc2")
+	abc2.Merge(a)
+	abc2.Merge(bc)
+
+	abcElems := abc.Elements()
+	abc2Elems := abc2.Elements()
+	slices.Sort(abcElems)
+	slices.Sort(abc2Elems)
+
+	c.Assert(abcElems, qt.DeepEquals, abc2Elems)
+}
+
+// --- State / FromCausal round-trip ---
+
+func TestStateFromCausalRoundTrip(t *testing.T) {
+	c := qt.New(t)
+	a := New[string]("a")
+	a.Add("x")
+	a.Add("y")
+
+	// Serialize and reconstruct.
+	state := a.State()
+	b := FromCausal[string](state)
+
+	c.Assert(b.Has("x"), qt.IsTrue)
+	c.Assert(b.Has("y"), qt.IsTrue)
+	c.Assert(b.Len(), qt.Equals, 2)
+}
+
+func TestFromCausalDeltaMerge(t *testing.T) {
+	c := qt.New(t)
+	a := New[string]("a")
+	delta := a.Add("x")
+
+	// Reconstruct the delta via FromCausal and merge it.
+	reconstructed := FromCausal[string](delta.State())
+
+	b := New[string]("b")
+	b.Merge(reconstructed)
+
+	c.Assert(b.Has("x"), qt.IsTrue)
+	c.Assert(b.Len(), qt.Equals, 1)
+}
+
+// --- Duplicate add on same replica ---
+
+func TestDuplicateAddSameReplica(t *testing.T) {
+	c := qt.New(t)
+	s := New[string]("a")
+	s.Add("x")
+	s.Add("x")
+
+	c.Assert(s.Has("x"), qt.IsTrue)
+	c.Assert(s.Len(), qt.Equals, 1)
+
+	// Element should have two dots (one per Add call).
+	ds, ok := s.state.Store.Get("x")
+	c.Assert(ok, qt.IsTrue)
+	count := 0
+	ds.Range(func(_ dotcontext.Dot) bool { count++; return true })
+	c.Assert(count, qt.Equals, 2)
+}
+
+// --- Concurrent removes ---
+
+func TestConcurrentRemovesSameElement(t *testing.T) {
+	c := qt.New(t)
+	a := New[string]("a")
+	b := New[string]("b")
+
+	// Both see "x".
+	addDelta := a.Add("x")
+	b.Merge(addDelta)
+
+	// Both remove "x" concurrently.
+	rmA := a.Remove("x")
+	rmB := b.Remove("x")
+
+	a.Merge(rmB)
+	b.Merge(rmA)
+
+	c.Assert(a.Has("x"), qt.IsFalse)
+	c.Assert(b.Has("x"), qt.IsFalse)
+}
+
+// --- Delta-delta merge ---
+
+func TestDeltaDeltaMerge(t *testing.T) {
+	c := qt.New(t)
+	a := New[string]("a")
+	d1 := a.Add("x")
+	d2 := a.Add("y")
+
+	// Merge two deltas together, then apply combined delta.
+	d1.Merge(d2)
+
+	b := New[string]("b")
+	b.Merge(d1)
+
+	c.Assert(b.Has("x"), qt.IsTrue)
+	c.Assert(b.Has("y"), qt.IsTrue)
+	c.Assert(b.Len(), qt.Equals, 2)
+}
+
+// --- Remove does not affect other elements ---
+
+func TestRemoveIsolation(t *testing.T) {
+	c := qt.New(t)
+	s := New[string]("a")
+	s.Add("x")
+	s.Add("y")
+	s.Add("z")
+	s.Remove("y")
+
+	c.Assert(s.Has("x"), qt.IsTrue)
+	c.Assert(s.Has("y"), qt.IsFalse)
+	c.Assert(s.Has("z"), qt.IsTrue)
 	c.Assert(s.Len(), qt.Equals, 2)
 }
 
