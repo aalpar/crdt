@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	qt "github.com/frankban/quicktest"
 )
 
 // TestREADMEGoSnippetsCompile extracts Go code blocks from README.md,
@@ -60,6 +62,104 @@ func TestREADMEGoSnippetsCompile(t *testing.T) {
 	}
 
 	t.Logf("verified %d Go code blocks from README.md compile", len(blocks))
+}
+
+func TestExtractGoCodeBlocks(t *testing.T) {
+	c := qt.New(t)
+
+	md := "# Heading\n\n```go\na := 1\n```\n\nsome text\n\n```go\nb := 2\n```\n"
+	blocks := extractGoCodeBlocks(md)
+	c.Assert(blocks, qt.HasLen, 2)
+	c.Assert(blocks[0], qt.Equals, "a := 1")
+	c.Assert(blocks[1], qt.Equals, "b := 2")
+}
+
+func TestExtractGoCodeBlocksIgnoresNonGo(t *testing.T) {
+	c := qt.New(t)
+
+	md := "```\nnot go\n```\n\n```python\nalso not go\n```\n\n```go\ngo code\n```\n"
+	blocks := extractGoCodeBlocks(md)
+	c.Assert(blocks, qt.HasLen, 1)
+	c.Assert(blocks[0], qt.Equals, "go code")
+}
+
+func TestExtractGoCodeBlocksEmpty(t *testing.T) {
+	c := qt.New(t)
+
+	blocks := extractGoCodeBlocks("# No code here\n\nJust text.\n")
+	c.Assert(blocks, qt.HasLen, 0)
+}
+
+func TestReadmeTopLevelVars(t *testing.T) {
+	c := qt.New(t)
+
+	block := "a := 1\nb := 2\nfmt.Println(a)"
+	vars := readmeTopLevelVars(block)
+	c.Assert(vars, qt.DeepEquals, []string{"a", "b"})
+}
+
+func TestReadmeTopLevelVarsMultiAssign(t *testing.T) {
+	c := qt.New(t)
+
+	block := "x, y := foo()"
+	vars := readmeTopLevelVars(block)
+	c.Assert(vars, qt.DeepEquals, []string{"x", "y"})
+}
+
+func TestReadmeTopLevelVarsSkipsClosure(t *testing.T) {
+	c := qt.New(t)
+
+	block := "a := 1\nfn := func() {\n\tb := 2\n}\nc := 3"
+	vars := readmeTopLevelVars(block)
+	// b is inside braces — should be excluded.
+	c.Assert(vars, qt.DeepEquals, []string{"a", "fn", "c"})
+}
+
+func TestReadmeTopLevelVarsSkipsBlankIdentifier(t *testing.T) {
+	c := qt.New(t)
+
+	block := "_ := ignored\na := 1"
+	vars := readmeTopLevelVars(block)
+	c.Assert(vars, qt.DeepEquals, []string{"a"})
+}
+
+func TestReadmeTopLevelVarsSkipsComments(t *testing.T) {
+	c := qt.New(t)
+
+	block := "// x := commented out\na := 1"
+	vars := readmeTopLevelVars(block)
+	c.Assert(vars, qt.DeepEquals, []string{"a"})
+}
+
+func TestReadmeTopLevelVarsNoDuplicates(t *testing.T) {
+	c := qt.New(t)
+
+	block := "a := 1\na := 2"
+	vars := readmeTopLevelVars(block)
+	c.Assert(vars, qt.DeepEquals, []string{"a"})
+}
+
+func TestAssembleREADMESourceInfersImports(t *testing.T) {
+	c := qt.New(t)
+
+	blocks := []string{"a := awset.New[string](\"r1\")\nfmt.Println(a)"}
+	source := assembleREADMESource(blocks)
+	c.Assert(strings.Contains(source, `"github.com/aalpar/crdt/awset"`), qt.IsTrue)
+	c.Assert(strings.Contains(source, `"fmt"`), qt.IsTrue)
+	// Should not import unused packages.
+	c.Assert(strings.Contains(source, `"github.com/aalpar/crdt/ewflag"`), qt.IsFalse)
+}
+
+func TestAssembleREADMESourceWrapsInFunctions(t *testing.T) {
+	c := qt.New(t)
+
+	blocks := []string{"x := 1", "y := 2"}
+	source := assembleREADMESource(blocks)
+	c.Assert(strings.Contains(source, "func readme_0()"), qt.IsTrue)
+	c.Assert(strings.Contains(source, "func readme_1()"), qt.IsTrue)
+	// Unused vars silenced.
+	c.Assert(strings.Contains(source, "_ = x"), qt.IsTrue)
+	c.Assert(strings.Contains(source, "_ = y"), qt.IsTrue)
 }
 
 // goCodeBlockRe matches fenced ```go code blocks in Markdown.
