@@ -359,6 +359,43 @@ func TestRemoveIsolation(t *testing.T) {
 	c.Assert(s.Len(), qt.Equals, 2)
 }
 
+// --- Five-replica convergence with mixed operations ---
+
+func TestFiveReplicaConvergence(t *testing.T) {
+	c := qt.New(t)
+	ids := []dotcontext.ReplicaID{"a", "b", "c", "d", "e"}
+	replicas := make([]*AWSet[string], len(ids))
+	for i, id := range ids {
+		replicas[i] = New[string](id)
+	}
+
+	// Each replica performs different operations.
+	deltas := make([]*AWSet[string], len(ids))
+	deltas[0] = replicas[0].Add("x")               // a adds "x"
+	deltas[1] = replicas[1].Add("y")               // b adds "y"
+	deltas[2] = replicas[2].Add("z")               // c adds "z"
+	replicas[3].Add("w")                            // d adds "w" (no delta saved)
+	deltas[3] = replicas[3].Remove("w")            // d removes "w" immediately
+	deltas[4] = replicas[4].Add("x")               // e also adds "x" concurrently
+
+	// Full mesh: every replica merges every other replica's delta.
+	for i := range replicas {
+		for j := range replicas {
+			if i != j && deltas[j] != nil {
+				replicas[i].Merge(deltas[j])
+			}
+		}
+	}
+
+	// All should converge: {"x", "y", "z"} — "w" was added then removed by d.
+	want := []string{"x", "y", "z"}
+	for i, r := range replicas {
+		elems := r.Elements()
+		slices.Sort(elems)
+		c.Assert(elems, qt.DeepEquals, want, qt.Commentf("replica %s", ids[i]))
+	}
+}
+
 // --- Three-replica convergence ---
 
 func TestThreeReplicaConvergence(t *testing.T) {

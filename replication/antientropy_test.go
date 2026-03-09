@@ -2,6 +2,7 @@ package replication
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -128,6 +129,86 @@ func TestWriteDeltaBatchEmptyStore(t *testing.T) {
 	n, err := WriteDeltaBatch(localCC, remoteCC, store, int64Codec{}, &buf)
 	c.Assert(err, qt.IsNil)
 	c.Assert(n, qt.Equals, 0)
+}
+
+// --- End-to-end with real CRDT deltas ---
+
+// causalDotSetCodec encodes Causal[*DotSet] for use as delta values.
+type causalDotSetCodec struct {
+	inner dotcontext.CausalCodec[*dotcontext.DotSet]
+}
+
+func newCausalDotSetCodec() causalDotSetCodec {
+	return causalDotSetCodec{
+		inner: dotcontext.CausalCodec[*dotcontext.DotSet]{
+			StoreCodec: dotcontext.DotSetCodec{},
+		},
+	}
+}
+
+func (c causalDotSetCodec) Encode(w io.Writer, v dotcontext.Causal[*dotcontext.DotSet]) error {
+	return c.inner.Encode(w, v)
+}
+
+func (c causalDotSetCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.DotSet], error) {
+	return c.inner.Decode(r)
+}
+
+func TestWriteReadDeltaBatchCausalDeltas(t *testing.T) {
+	c := qt.New(t)
+	codec := newCausalDotSetCodec()
+
+	// Simulate an AWSet-like replica: two adds produce two Causal[*DotSet] deltas.
+	localCC := dotcontext.New()
+	d1 := localCC.Next("a") // a:1
+	d2 := localCC.Next("a") // a:2
+
+	store := dotcontext.NewDeltaStore[dotcontext.Causal[*dotcontext.DotSet]]()
+
+	// Delta for d1: store={d1}, context={d1}.
+	ds1 := dotcontext.NewDotSet()
+	ds1.Add(d1)
+	ctx1 := dotcontext.New()
+	ctx1.Add(d1)
+	store.Add(d1, dotcontext.Causal[*dotcontext.DotSet]{Store: ds1, Context: ctx1})
+
+	// Delta for d2: store={d2}, context={d2}.
+	ds2 := dotcontext.NewDotSet()
+	ds2.Add(d2)
+	ctx2 := dotcontext.New()
+	ctx2.Add(d2)
+	store.Add(d2, dotcontext.Causal[*dotcontext.DotSet]{Store: ds2, Context: ctx2})
+
+	// Remote has seen d1 but not d2.
+	remoteCC := dotcontext.New()
+	remoteCC.Add(d1)
+
+	// Write missing deltas.
+	var buf bytes.Buffer
+	n, err := WriteDeltaBatch(localCC, remoteCC, store, codec, &buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, 1)
+
+	// Read and merge into a fresh DotSet state.
+	result := dotcontext.Causal[*dotcontext.DotSet]{
+		Store:   dotcontext.NewDotSet(),
+		Context: dotcontext.New(),
+	}
+	// Pre-populate with what remote already has.
+	result.Store.Add(d1)
+	result.Context.Add(d1)
+
+	nRead, err := ReadDeltaBatch(codec, &buf, func(d dotcontext.Dot, delta dotcontext.Causal[*dotcontext.DotSet]) {
+		result = dotcontext.JoinDotSet(result, delta)
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(nRead, qt.Equals, 1)
+
+	// Result should have both dots.
+	c.Assert(result.Store.Has(d1), qt.IsTrue)
+	c.Assert(result.Store.Has(d2), qt.IsTrue)
+	c.Assert(result.Context.Has(d1), qt.IsTrue)
+	c.Assert(result.Context.Has(d2), qt.IsTrue)
 }
 
 func TestWriteDeltaBatchMissingNotInStore(t *testing.T) {

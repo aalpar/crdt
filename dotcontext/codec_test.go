@@ -406,6 +406,111 @@ func TestCausalContextCodecPreservesOutliers(t *testing.T) {
 	c.Assert(decoded.Has(Dot{ID: "a", Seq: 5}), qt.IsTrue)
 }
 
+// --- DotFun codec with multi-field struct lattice ---
+
+// timestamped pairs a value with a timestamp, similar to lwwregister's internal type.
+type timestamped struct {
+	value string
+	ts    int64
+}
+
+func (a timestamped) Join(b timestamped) timestamped {
+	if b.ts > a.ts {
+		return b
+	}
+	return a
+}
+
+type timestampedCodec struct{}
+
+func (timestampedCodec) Encode(w io.Writer, v timestamped) error {
+	if err := (StringCodec{}).Encode(w, v.value); err != nil {
+		return err
+	}
+	return (Int64Codec{}).Encode(w, v.ts)
+}
+
+func (timestampedCodec) Decode(r io.Reader) (timestamped, error) {
+	val, err := (StringCodec{}).Decode(r)
+	if err != nil {
+		return timestamped{}, err
+	}
+	ts, err := (Int64Codec{}).Decode(r)
+	if err != nil {
+		return timestamped{}, err
+	}
+	return timestamped{value: val, ts: ts}, nil
+}
+
+func TestDotFunCodecMultiFieldStruct(t *testing.T) {
+	c := qt.New(t)
+	var buf bytes.Buffer
+	fc := DotFunCodec[timestamped]{ValueCodec: timestampedCodec{}}
+
+	df := NewDotFun[timestamped]()
+	df.Set(Dot{ID: "a", Seq: 1}, timestamped{value: "hello", ts: 100})
+	df.Set(Dot{ID: "b", Seq: 2}, timestamped{value: "world", ts: 200})
+
+	c.Assert(fc.Encode(&buf, df), qt.IsNil)
+	got, err := fc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Len(), qt.Equals, 2)
+
+	v1, ok := got.Get(Dot{ID: "a", Seq: 1})
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v1.value, qt.Equals, "hello")
+	c.Assert(v1.ts, qt.Equals, int64(100))
+
+	v2, ok := got.Get(Dot{ID: "b", Seq: 2})
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v2.value, qt.Equals, "world")
+	c.Assert(v2.ts, qt.Equals, int64(200))
+}
+
+func TestDotFunCodecMultiFieldPreservesJoin(t *testing.T) {
+	c := qt.New(t)
+	fc := DotFunCodec[timestamped]{ValueCodec: timestampedCodec{}}
+	d := Dot{ID: "a", Seq: 1}
+
+	// Two sides with the same dot but different values.
+	a := Causal[*DotFun[timestamped]]{Store: NewDotFun[timestamped](), Context: New()}
+	a.Store.Set(d, timestamped{value: "old", ts: 10})
+	a.Context.Add(d)
+
+	b := Causal[*DotFun[timestamped]]{Store: NewDotFun[timestamped](), Context: New()}
+	b.Store.Set(d, timestamped{value: "new", ts: 20})
+	b.Context.Add(d)
+
+	// Join before encoding.
+	directJoin := JoinDotFun(a, b)
+
+	// Encode, decode, then join.
+	var bufA, bufB bytes.Buffer
+	c.Assert(fc.Encode(&bufA, a.Store), qt.IsNil)
+	decodedA, err := fc.Decode(&bufA)
+	c.Assert(err, qt.IsNil)
+
+	c.Assert(fc.Encode(&bufB, b.Store), qt.IsNil)
+	decodedB, err := fc.Decode(&bufB)
+	c.Assert(err, qt.IsNil)
+
+	roundTripJoin := JoinDotFun(
+		Causal[*DotFun[timestamped]]{Store: decodedA, Context: a.Context.Clone()},
+		Causal[*DotFun[timestamped]]{Store: decodedB, Context: b.Context.Clone()},
+	)
+
+	// The lattice join should pick ts=20 ("new").
+	v, ok := directJoin.Store.Get(d)
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v.value, qt.Equals, "new")
+	c.Assert(v.ts, qt.Equals, int64(20))
+
+	v2, ok := roundTripJoin.Store.Get(d)
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v2.value, qt.Equals, v.value)
+	c.Assert(v2.ts, qt.Equals, v.ts)
+}
+
 // --- Fuzz targets ---
 
 func FuzzDecodeDotSet(f *testing.F) {
