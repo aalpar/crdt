@@ -465,6 +465,49 @@ func TestCausalContextMissingAsymmetric(t *testing.T) {
 	c.Assert(hasZ, qt.IsFalse) // b already has z:1
 }
 
+// TestCausalContextMissingPureOutliers verifies Missing() when both
+// sides have only outliers (no contiguous VV entries) for a replica.
+func TestCausalContextMissingPureOutliers(t *testing.T) {
+	c := qt.New(t)
+
+	// Local has only outliers for "a" — no VV entry (VV["a"] == 0).
+	local := New()
+	local.Add(Dot{ID: "a", Seq: 3}) // outlier
+	local.Add(Dot{ID: "a", Seq: 5}) // outlier
+
+	// Remote also has only outliers for "a", some overlapping.
+	remote := New()
+	remote.Add(Dot{ID: "a", Seq: 2}) // outlier, local doesn't have
+	remote.Add(Dot{ID: "a", Seq: 5}) // outlier, local has this one
+	remote.Add(Dot{ID: "a", Seq: 7}) // outlier, local doesn't have
+
+	got := local.Missing(remote)
+	// Local is missing a:2 and a:7 from remote. a:5 is already observed.
+	want := map[ReplicaID][]SeqRange{
+		"a": {{Lo: 2, Hi: 2}, {Lo: 7, Hi: 7}},
+	}
+	c.Assert(missingEqual(got, want), qt.IsTrue, qt.Commentf("got %v, want %v", got, want))
+}
+
+// TestCausalContextMissingPureOutliersNewReplica verifies Missing()
+// when the remote has a replica unknown to the local, using only outliers.
+func TestCausalContextMissingPureOutliersNewReplica(t *testing.T) {
+	c := qt.New(t)
+
+	local := New()
+	local.Next("x") // local knows "x" but not "a"
+
+	remote := New()
+	remote.Add(Dot{ID: "a", Seq: 3}) // outlier only, no VV
+	remote.Add(Dot{ID: "a", Seq: 5}) // outlier only
+
+	got := local.Missing(remote)
+	want := map[ReplicaID][]SeqRange{
+		"a": {{Lo: 3, Hi: 3}, {Lo: 5, Hi: 5}},
+	}
+	c.Assert(missingEqual(got, want), qt.IsTrue, qt.Commentf("got %v, want %v", got, want))
+}
+
 func TestMergeRanges(t *testing.T) {
 	c := qt.New(t)
 

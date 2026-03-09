@@ -372,6 +372,59 @@ func TestE2EDuplicateDeltaDelivery(t *testing.T) {
 	c.Assert(sortedElements(bob.set), qt.DeepEquals, []string{"x", "y"})
 }
 
+// TestE2EOutOfOrderDelivery verifies that deltas applied in a different
+// order than they were generated produce the same converged state.
+func TestE2EOutOfOrderDelivery(t *testing.T) {
+	c := qt.New(t)
+	codec := newAWSetDeltaCodec()
+
+	alice := newReplica("alice", "bob")
+
+	// Alice adds three elements, generating dots (alice:1), (alice:2), (alice:3).
+	alice.add("a")
+	alice.add("b")
+	alice.add("c")
+
+	// Encode all deltas.
+	var buf bytes.Buffer
+	n, err := WriteDeltaBatch(
+		alice.set.State().Context,
+		dotcontext.New(),
+		alice.store,
+		codec,
+		&buf,
+	)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, 3)
+
+	// Decode to get individual deltas.
+	type taggedDelta struct {
+		dot   dotcontext.Dot
+		delta dotcontext.Causal[*dotcontext.DotMap[string, *dotcontext.DotSet]]
+	}
+	var deltas []taggedDelta
+	ReadDeltaBatch(codec, &buf, func(d dotcontext.Dot, delta dotcontext.Causal[*dotcontext.DotMap[string, *dotcontext.DotSet]]) {
+		deltas = append(deltas, taggedDelta{d, delta})
+	})
+	c.Assert(len(deltas), qt.Equals, 3)
+
+	// Apply in forward order to bob1.
+	bob1 := newReplica("bob", "alice")
+	for _, d := range deltas {
+		bob1.set.Merge(awset.FromCausal[string](d.delta))
+	}
+
+	// Apply in reverse order to bob2.
+	bob2 := newReplica("bob", "alice")
+	for i := len(deltas) - 1; i >= 0; i-- {
+		bob2.set.Merge(awset.FromCausal[string](deltas[i].delta))
+	}
+
+	// Both must converge to the same state.
+	c.Assert(sortedElements(bob1.set), qt.DeepEquals, []string{"a", "b", "c"})
+	c.Assert(sortedElements(bob2.set), qt.DeepEquals, []string{"a", "b", "c"})
+}
+
 // --- LWWRegister codec ---
 
 type timestampedStringCodec struct{}

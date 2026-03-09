@@ -1,6 +1,7 @@
 package dotcontext
 
 import (
+	"fmt"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -471,4 +472,113 @@ func TestJoinDotSetAssociative(t *testing.T) {
 	ab_x := JoinDotSet(JoinDotSet(a, b), x)
 	a_bx := JoinDotSet(a, JoinDotSet(b, x))
 	c.Assert(dotSetEqual(ab_x.Store, a_bx.Store), qt.IsTrue)
+}
+
+// --- Large store stress tests ---
+
+// TestJoinDotSetLarge verifies join correctness with 1000+ dots per side.
+func TestJoinDotSetLarge(t *testing.T) {
+	c := qt.New(t)
+	const n = 1000
+
+	// Side a: replicas r0..r9, each with 100 contiguous dots.
+	a := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
+	for r := 0; r < 10; r++ {
+		id := ReplicaID(fmt.Sprintf("r%d", r))
+		for s := uint64(1); s <= uint64(n/10); s++ {
+			d := Dot{ID: id, Seq: s}
+			a.Store.Add(d)
+			a.Context.Add(d)
+		}
+	}
+
+	// Side b: overlaps on r0..r4 (same dots), plus r10..r14 (new).
+	b := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
+	for r := 0; r < 10; r++ {
+		id := ReplicaID(fmt.Sprintf("r%d", r+5))
+		for s := uint64(1); s <= uint64(n/10); s++ {
+			d := Dot{ID: id, Seq: s}
+			b.Store.Add(d)
+			b.Context.Add(d)
+		}
+	}
+
+	result := JoinDotSet(a, b)
+
+	// All dots from both sides should survive (no removes — both
+	// sides only add, with partial overlap).
+	c.Assert(result.Store.Len() > n, qt.IsTrue,
+		qt.Commentf("expected >%d dots, got %d", n, result.Store.Len()))
+
+	// Idempotent: joining again should not change result.
+	result2 := JoinDotSet(result, result)
+	c.Assert(dotSetEqual(result.Store, result2.Store), qt.IsTrue)
+}
+
+// TestJoinDotFunLarge verifies join correctness with 1000+ DotFun entries.
+func TestJoinDotFunLarge(t *testing.T) {
+	c := qt.New(t)
+	const n = 1000
+
+	a := Causal[*DotFun[maxInt]]{Store: NewDotFun[maxInt](), Context: New()}
+	b := Causal[*DotFun[maxInt]]{Store: NewDotFun[maxInt](), Context: New()}
+
+	for i := uint64(1); i <= n; i++ {
+		da := Dot{ID: "a", Seq: i}
+		a.Store.Set(da, maxInt(i))
+		a.Context.Add(da)
+
+		db := Dot{ID: "b", Seq: i}
+		b.Store.Set(db, maxInt(i*10))
+		b.Context.Add(db)
+	}
+
+	result := JoinDotFun(a, b)
+
+	// All dots from both sides should survive (disjoint replicas).
+	c.Assert(result.Store.Len(), qt.Equals, 2*n)
+
+	// Spot check values.
+	va, ok := result.Store.Get(Dot{ID: "a", Seq: 500})
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(va, qt.Equals, maxInt(500))
+
+	vb, ok := result.Store.Get(Dot{ID: "b", Seq: 500})
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(vb, qt.Equals, maxInt(5000))
+}
+
+// TestJoinDotMapLarge verifies join correctness with 1000+ DotMap keys.
+func TestJoinDotMapLarge(t *testing.T) {
+	c := qt.New(t)
+	const n = 1000
+	joinDS := func(x, y Causal[*DotSet]) Causal[*DotSet] { return JoinDotSet(x, y) }
+
+	a := Causal[*DotMap[string, *DotSet]]{Store: NewDotMap[string, *DotSet](), Context: New()}
+	b := Causal[*DotMap[string, *DotSet]]{Store: NewDotMap[string, *DotSet](), Context: New()}
+
+	for i := uint64(1); i <= n; i++ {
+		key := fmt.Sprintf("k%d", i)
+
+		da := Dot{ID: "a", Seq: i}
+		dsA := NewDotSet()
+		dsA.Add(da)
+		a.Store.Set(key, dsA)
+		a.Context.Add(da)
+
+		db := Dot{ID: "b", Seq: i}
+		dsB := NewDotSet()
+		dsB.Add(db)
+		b.Store.Set(key, dsB)
+		b.Context.Add(db)
+	}
+
+	result := JoinDotMap(a, b, joinDS, NewDotSet)
+
+	// Each key should have 2 dots (one from each side).
+	c.Assert(result.Store.Len(), qt.Equals, n)
+	result.Store.Range(func(k string, ds *DotSet) bool {
+		c.Assert(ds.Len(), qt.Equals, 2, qt.Commentf("key %s", k))
+		return true
+	})
 }

@@ -887,3 +887,46 @@ func TestDecodeAtExactMaxDecodeLen(t *testing.T) {
 		check(c, err)
 	})
 }
+
+// TestDotMapCodecThreeLevelNested verifies codec round-trip with 3 levels
+// of DotMap nesting: DotMap[string, *DotMap[string, *DotMap[string, *DotSet]]].
+func TestDotMapCodecThreeLevelNested(t *testing.T) {
+	c := qt.New(t)
+	var buf bytes.Buffer
+
+	level1 := DotMapCodec[string, *DotSet]{
+		KeyCodec: StringCodec{}, ValueCodec: DotSetCodec{},
+	}
+	level2 := DotMapCodec[string, *DotMap[string, *DotSet]]{
+		KeyCodec: StringCodec{}, ValueCodec: &level1,
+	}
+	level3 := DotMapCodec[string, *DotMap[string, *DotMap[string, *DotSet]]]{
+		KeyCodec: StringCodec{}, ValueCodec: &level2,
+	}
+
+	// Build: outer["a"]["b"]["c"] = DotSet{(w1:1)}
+	leaf := NewDotSet()
+	leaf.Add(Dot{ID: "w1", Seq: 1})
+
+	inner := NewDotMap[string, *DotSet]()
+	inner.Set("c", leaf)
+
+	mid := NewDotMap[string, *DotMap[string, *DotSet]]()
+	mid.Set("b", inner)
+
+	outer := NewDotMap[string, *DotMap[string, *DotMap[string, *DotSet]]]()
+	outer.Set("a", mid)
+
+	c.Assert(level3.Encode(&buf, outer), qt.IsNil)
+	got, err := level3.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Len(), qt.Equals, 1)
+
+	gotMid, ok := got.Get("a")
+	c.Assert(ok, qt.IsTrue)
+	gotInner, ok := gotMid.Get("b")
+	c.Assert(ok, qt.IsTrue)
+	gotLeaf, ok := gotInner.Get("c")
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(gotLeaf.Has(Dot{ID: "w1", Seq: 1}), qt.IsTrue)
+}
