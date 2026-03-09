@@ -262,6 +262,151 @@ func TestThreeReplicaConvergence(t *testing.T) {
 	}
 }
 
+// --- Merge associativity ---
+
+func TestMergeAssociative(t *testing.T) {
+	c := qt.New(t)
+	a := newSetMap("a")
+	b := newSetMap("b")
+	x := newSetMap("c")
+
+	a.Apply("x", addDot)
+	a.Apply("y", addDot)
+	b.Apply("y", addDot)
+	b.Apply("z", addDot)
+	x.Apply("x", addDot)
+	x.Remove("x")
+	x.Apply("w", addDot)
+
+	// (a ⊔ b) ⊔ c
+	ab := newSetMap("ab")
+	ab.Merge(a)
+	ab.Merge(b)
+	abc := newSetMap("abc")
+	abc.Merge(ab)
+	abc.Merge(x)
+
+	// a ⊔ (b ⊔ c)
+	bc := newSetMap("bc")
+	bc.Merge(b)
+	bc.Merge(x)
+	abc2 := newSetMap("abc2")
+	abc2.Merge(a)
+	abc2.Merge(bc)
+
+	abcKeys := abc.Keys()
+	abc2Keys := abc2.Keys()
+	slices.Sort(abcKeys)
+	slices.Sort(abc2Keys)
+	c.Assert(abcKeys, qt.DeepEquals, abc2Keys)
+}
+
+// --- Delta-delta merge ---
+
+func TestDeltaDeltaMerge(t *testing.T) {
+	c := qt.New(t)
+	a := newSetMap("a")
+	d1 := a.Apply("x", addDot)
+	d2 := a.Apply("y", addDot)
+
+	// Combine deltas, then apply.
+	d1.Merge(d2)
+
+	b := newSetMap("b")
+	b.Merge(d1)
+
+	keys := b.Keys()
+	slices.Sort(keys)
+	c.Assert(keys, qt.DeepEquals, []string{"x", "y"})
+}
+
+// --- Concurrent removes ---
+
+func TestConcurrentRemovesSameKey(t *testing.T) {
+	c := qt.New(t)
+	a := newSetMap("a")
+	b := newSetMap("b")
+
+	addDelta := a.Apply("x", addDot)
+	b.Merge(addDelta)
+
+	rmA := a.Remove("x")
+	rmB := b.Remove("x")
+
+	a.Merge(rmB)
+	b.Merge(rmA)
+
+	c.Assert(a.Has("x"), qt.IsFalse)
+	c.Assert(b.Has("x"), qt.IsFalse)
+}
+
+// --- Remove then re-apply ---
+
+func TestRemoveThenReApply(t *testing.T) {
+	c := qt.New(t)
+	m := newSetMap("a")
+	m.Apply("x", addDot)
+	m.Remove("x")
+	c.Assert(m.Has("x"), qt.IsFalse)
+
+	m.Apply("x", addDot)
+	c.Assert(m.Has("x"), qt.IsTrue)
+	c.Assert(m.Len(), qt.Equals, 1)
+}
+
+// --- Nested value merge after concurrent apply ---
+
+func TestConcurrentApplySameKeyMergesValues(t *testing.T) {
+	c := qt.New(t)
+	a := newSetMap("a")
+	b := newSetMap("b")
+
+	// Both apply to the same key concurrently — values should merge (union of dot sets).
+	da := a.Apply("x", addDot)
+	a.Apply("x", addDot) // a has 2 dots for "x"
+	db := b.Apply("x", addDot)
+
+	a.Merge(db)
+	b.Merge(da)
+
+	// After merge, both should have "x" with merged dots.
+	c.Assert(a.Has("x"), qt.IsTrue)
+	c.Assert(b.Has("x"), qt.IsTrue)
+
+	vA, _ := a.Get("x")
+	vB, _ := b.Get("x")
+	c.Assert(vA.Len(), qt.Equals, 3) // 2 from a + 1 from b
+	c.Assert(vB.Len(), qt.Equals, 2) // 1 from a's first delta + 1 from b
+}
+
+// --- Merge with empty map ---
+
+func TestMergeIntoEmpty(t *testing.T) {
+	c := qt.New(t)
+	a := newSetMap("a")
+	a.Apply("x", addDot)
+	a.Apply("y", addDot)
+
+	b := newSetMap("b")
+	b.Merge(a)
+
+	keys := b.Keys()
+	slices.Sort(keys)
+	c.Assert(keys, qt.DeepEquals, []string{"x", "y"})
+}
+
+func TestMergeEmptyIntoPopulated(t *testing.T) {
+	c := qt.New(t)
+	a := newSetMap("a")
+	a.Apply("x", addDot)
+
+	empty := newSetMap("b")
+	a.Merge(empty)
+
+	c.Assert(a.Has("x"), qt.IsTrue)
+	c.Assert(a.Len(), qt.Equals, 1)
+}
+
 // --- Apply with supersede (replace pattern) ---
 
 func TestApplySupersede(t *testing.T) {
