@@ -59,6 +59,8 @@ Each composes dotcontext types. Mutators return deltas for replication.
 - `Compact()` removes outliers at or below the version vector frontier, not just contiguous ones
 - `Merge()` uses a sorted-merge pass for outliers (O(m+n)), not per-element insert
 - Decode errors are typed (`*DecodeLimitError`) — use `errors.As` to distinguish malformed input from I/O errors
+- `CausalCodec[T]` satisfies `Codec[Causal[T]]` directly — no wrapper types needed for codec composition
+- `pncounter` and `gcounter` share the same find-own-dot/replace/build-delta pattern (int64 vs uint64); cross-referenced via NOTE comments
 
 ## Package Map
 
@@ -80,6 +82,10 @@ Each composes dotcontext types. Mutators return deltas for replication.
 ### Shared Test Harness: `crdttest/`
 
 `crdttest.Harness[T]` validates semilattice properties generically. Each CRDT provides a `shared_test.go` configuring `New`, `Merge`, `Equal`, and `Ops` (≥5 mutation functions). The harness runs: idempotent/commutative/associative merge, incremental vs full delta propagation, delta-delta merge, empty merge, and 3/5-replica convergence. CRDT-specific tests (conflict resolution, delta structure, round-trip) remain per-package.
+
+### E2E Replication Tests: `replication/e2e_test.go`
+
+End-to-end tests exercise the full pipeline: mutate → store delta → `WriteDeltaBatch` → `ReadDeltaBatch` → Merge → Ack → GC. Covered CRDTs: AWSet, RWSet, LWWRegister, PNCounter, EWFlag, ORMap, MVRegister. Not yet covered: DWFlag, GCounter (structurally identical to tested EWFlag/PNCounter).
 
 ## Testing
 
