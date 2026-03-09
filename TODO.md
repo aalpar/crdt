@@ -8,7 +8,7 @@
 - [x] `JoinDotFun`, `JoinDotMap` — lattice join, recursive join with callback
 - [x] `CausalContext.ReplicaIDs` accessor
 
-554 tests passing across all packages (includes semilattice property checks, fuzz seed corpus).
+644 tests passing across all packages (includes semilattice property checks, fuzz seed corpus).
 
 ## Higher-level CRDTs (compose dotcontext)
 
@@ -20,10 +20,10 @@
 ## New CRDT types
 
 - [x] `mvregister` — multi-value register (concurrent writes preserved, not LWW)
-- [ ] `gcounter` — grow-only counter (simpler than PN, useful as building block)
+- [x] `gcounter` — grow-only counter (simpler than PN, useful as building block)
 - [x] `ewflag` — enable-wins flag (`DotSet` — simplest possible CRDT)
-- [ ] `dwflag` — disable-wins flag (complement of ewflag)
-- [ ] `rwset` — remove-wins observed-remove set (dual of AWSet)
+- [x] `dwflag` — disable-wins flag (complement of ewflag)
+- [x] `rwset` — remove-wins observed-remove set (dual of AWSet)
 
 ## Optimization
 

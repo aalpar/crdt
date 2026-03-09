@@ -38,10 +38,13 @@ Each composes dotcontext types. Mutators return deltas for replication.
 | Package | Type | Composition | Conflict Resolution |
 |---------|------|-------------|-------------------|
 | `awset/` | `AWSet[E]` | `DotMap[E, *DotSet]` | Concurrent add+remove → add wins |
+| `rwset/` | `RWSet[E]` | `DotMap[E, *DotFun[Presence]]` | Concurrent add+remove → remove wins |
 | `lwwregister/` | `LWWRegister[V]` | `DotFun[Timestamped[V]]` | Highest timestamp wins, tiebreak by replica ID |
 | `pncounter/` | `Counter` | `DotFun[CounterValue]` | Sum of per-replica contributions |
+| `gcounter/` | `Counter` | `DotFun[GValue]` | Sum of per-replica contributions (grow-only) |
 | `ormap/` | `ORMap[K, V]` | `DotMap[K, V DotStore]` | Add-wins keys, recursive value merge |
 | `ewflag/` | `EWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → enable wins |
+| `dwflag/` | `DWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → disable wins |
 
 ### Key Design Decisions
 
@@ -56,15 +59,18 @@ Each composes dotcontext types. Mutators return deltas for replication.
 |---------|-----------|-------|
 | `dotcontext/` | Dot, CausalContext, DotSet, DotFun, DotMap, Causal | 11 source + 10 test |
 | `awset/` | AWSet | 2 source + 2 test |
+| `rwset/` | RWSet, Presence | 2 source + 1 test |
 | `lwwregister/` | LWWRegister | 2 source + 1 test |
 | `pncounter/` | Counter | 2 source + 1 test |
+| `gcounter/` | Counter, GValue | 2 source + 1 test |
 | `ormap/` | ORMap | 2 source + 1 test |
 | `ewflag/` | EWFlag | 2 source + 1 test |
+| `dwflag/` | DWFlag | 2 source + 1 test |
 | `replication/` | PeerTracker, GC, WriteDeltaBatch | 4 source + 4 test |
 
 ## Testing
 
-- `go test ./...` — 524 tests across all packages
+- `go test ./...` — 644 tests across all packages
 - `go test -race ./...` — race detector
 - `go test -fuzz=FuzzJoinDotSetSemilattice ./dotcontext/` — fuzz semilattice properties
 - `make benchmark` — benchmarks across all packages
