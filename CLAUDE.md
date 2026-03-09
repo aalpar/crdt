@@ -63,7 +63,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 
 ## Testing
 
-- `go test ./...` — 273 tests across all packages
+- `go test ./...` — 284 tests across all packages
 - `go test -race ./...` — race detector
 - `go test -fuzz=FuzzJoinDotSetSemilattice ./dotcontext/` — fuzz semilattice properties
 - `go test -bench=. -benchmem ./dotcontext/` — benchmarks
