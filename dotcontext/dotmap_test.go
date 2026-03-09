@@ -95,3 +95,17 @@ func TestDotMapDots(t *testing.T) {
 
 	c.Assert(m.Dots().Len(), qt.Equals, 2)
 }
+
+func TestDotMapDotsReturnsClone(t *testing.T) {
+	c := qt.New(t)
+	m := NewDotMap[string, *DotSet]()
+	s := NewDotSet()
+	s.Add(Dot{ID: "a", Seq: 1})
+	m.Set("key", s)
+
+	dots := m.Dots()
+	dots.Add(Dot{ID: "b", Seq: 2})
+
+	// Original should be unaffected.
+	c.Assert(m.Dots().Len(), qt.Equals, 1)
+}

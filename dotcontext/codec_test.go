@@ -837,3 +837,53 @@ func TestDecodeTruncatedInput(t *testing.T) {
 		c.Assert(err, qt.IsNotNil)
 	})
 }
+
+// TestDecodeAtExactMaxDecodeLen verifies the boundary: length == maxDecodeLen
+// passes the length check (fails later on insufficient data), while
+// length == maxDecodeLen+1 is rejected with "exceeds max" (tested above).
+func TestDecodeAtExactMaxDecodeLen(t *testing.T) {
+	c := qt.New(t)
+
+	// Encode a length prefix of exactly maxDecodeLen.
+	var buf bytes.Buffer
+	Uint64Codec{}.Encode(&buf, maxDecodeLen)
+	header := buf.Bytes()
+
+	// Each decoder should pass the length check but fail on
+	// insufficient data — error must NOT be "exceeds max".
+	check := func(c *qt.C, err error) {
+		c.Helper()
+		c.Assert(err, qt.IsNotNil)
+		c.Assert(err.Error(), qt.Not(qt.Matches), `.*exceeds max.*`)
+	}
+
+	c.Run("StringCodec", func(c *qt.C) {
+		_, err := (StringCodec{}).Decode(bytes.NewReader(header))
+		check(c, err)
+	})
+	c.Run("DotSetCodec", func(c *qt.C) {
+		_, err := (DotSetCodec{}).Decode(bytes.NewReader(header))
+		check(c, err)
+	})
+	c.Run("DotFunCodec", func(c *qt.C) {
+		_, err := (DotFunCodec[maxInt]{ValueCodec: maxIntCodec{}}).Decode(bytes.NewReader(header))
+		check(c, err)
+	})
+	c.Run("DotMapCodec", func(c *qt.C) {
+		mc := DotMapCodec[string, *DotSet]{KeyCodec: StringCodec{}, ValueCodec: DotSetCodec{}}
+		_, err := mc.Decode(bytes.NewReader(header))
+		check(c, err)
+	})
+	c.Run("CausalContextCodec", func(c *qt.C) {
+		_, err := (CausalContextCodec{}).Decode(bytes.NewReader(header))
+		check(c, err)
+	})
+	c.Run("MissingCodec", func(c *qt.C) {
+		_, err := (MissingCodec{}).Decode(bytes.NewReader(header))
+		check(c, err)
+	})
+	c.Run("DeltaBatchCodec", func(c *qt.C) {
+		_, err := (DeltaBatchCodec[int64]{DeltaCodec: Int64Codec{}}).Decode(bytes.NewReader(header))
+		check(c, err)
+	})
+}

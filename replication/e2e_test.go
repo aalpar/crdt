@@ -10,6 +10,8 @@ import (
 
 	"github.com/aalpar/crdt/awset"
 	"github.com/aalpar/crdt/dotcontext"
+	"github.com/aalpar/crdt/lwwregister"
+	"github.com/aalpar/crdt/pncounter"
 )
 
 // awsetDeltaCodec encodes AWSet deltas (Causal[*DotMap[string, *DotSet]])
@@ -326,4 +328,198 @@ func TestE2ERemoveDeltaAcrossWire(t *testing.T) {
 	alice.set.Merge(awset.FromCausal[string](decoded))
 	c.Assert(alice.set.Has("x"), qt.IsTrue, qt.Commentf("x must survive the remove of y"))
 	c.Assert(alice.set.Has("y"), qt.IsFalse, qt.Commentf("y must be removed"))
+}
+
+// TestE2EDuplicateDeltaDelivery verifies that applying the same delta
+// batch twice is idempotent — the second merge has no effect.
+func TestE2EDuplicateDeltaDelivery(t *testing.T) {
+	c := qt.New(t)
+	codec := newAWSetDeltaCodec()
+
+	alice := newReplica("alice", "bob")
+	bob := newReplica("bob", "alice")
+
+	alice.add("x")
+	alice.add("y")
+
+	// Encode all of alice's deltas as if bob has nothing.
+	var buf bytes.Buffer
+	n, err := WriteDeltaBatch(
+		alice.set.State().Context,
+		dotcontext.New(),
+		alice.store,
+		codec,
+		&buf,
+	)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, 2)
+	encoded := buf.Bytes()
+
+	applyBatch := func() {
+		_, err := ReadDeltaBatch(codec, bytes.NewReader(encoded),
+			func(_ dotcontext.Dot, delta dotcontext.Causal[*dotcontext.DotMap[string, *dotcontext.DotSet]]) {
+				bob.set.Merge(awset.FromCausal[string](delta))
+			})
+		c.Assert(err, qt.IsNil)
+	}
+
+	// First delivery.
+	applyBatch()
+	c.Assert(sortedElements(bob.set), qt.DeepEquals, []string{"x", "y"})
+
+	// Duplicate delivery — exact same bytes, merge must be idempotent.
+	applyBatch()
+	c.Assert(sortedElements(bob.set), qt.DeepEquals, []string{"x", "y"})
+}
+
+// --- LWWRegister codec ---
+
+type timestampedStringCodec struct{}
+
+func (timestampedStringCodec) Encode(w io.Writer, v lwwregister.Timestamped[string]) error {
+	if err := (dotcontext.StringCodec{}).Encode(w, v.Value); err != nil {
+		return err
+	}
+	return (dotcontext.Int64Codec{}).Encode(w, v.Ts)
+}
+
+func (timestampedStringCodec) Decode(r io.Reader) (lwwregister.Timestamped[string], error) {
+	val, err := (dotcontext.StringCodec{}).Decode(r)
+	if err != nil {
+		return lwwregister.Timestamped[string]{}, err
+	}
+	ts, err := (dotcontext.Int64Codec{}).Decode(r)
+	if err != nil {
+		return lwwregister.Timestamped[string]{}, err
+	}
+	return lwwregister.Timestamped[string]{Value: val, Ts: ts}, nil
+}
+
+type lwwDeltaCodec struct {
+	inner dotcontext.CausalCodec[*dotcontext.DotFun[lwwregister.Timestamped[string]]]
+}
+
+func newLWWDeltaCodec() lwwDeltaCodec {
+	return lwwDeltaCodec{
+		inner: dotcontext.CausalCodec[*dotcontext.DotFun[lwwregister.Timestamped[string]]]{
+			StoreCodec: dotcontext.DotFunCodec[lwwregister.Timestamped[string]]{
+				ValueCodec: timestampedStringCodec{},
+			},
+		},
+	}
+}
+
+func (c lwwDeltaCodec) Encode(w io.Writer, v dotcontext.Causal[*dotcontext.DotFun[lwwregister.Timestamped[string]]]) error {
+	return c.inner.Encode(w, v)
+}
+
+func (c lwwDeltaCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.DotFun[lwwregister.Timestamped[string]]], error) {
+	return c.inner.Decode(r)
+}
+
+// TestE2ELWWRegisterAcrossWire verifies that LWWRegister deltas
+// (DotFun-based, unlike AWSet's DotMap) survive encode→decode→merge
+// and that LWW conflict resolution works across the wire.
+func TestE2ELWWRegisterAcrossWire(t *testing.T) {
+	c := qt.New(t)
+	codec := newLWWDeltaCodec()
+
+	alice := lwwregister.New[string]("alice")
+	bob := lwwregister.New[string]("bob")
+
+	// Concurrent writes: alice at ts=100, bob at ts=200.
+	aliceDelta := alice.Set("hello", 100)
+	bobDelta := bob.Set("world", 200)
+
+	// Encode both deltas.
+	var bufA, bufB bytes.Buffer
+	c.Assert(codec.Encode(&bufA, aliceDelta.State()), qt.IsNil)
+	c.Assert(codec.Encode(&bufB, bobDelta.State()), qt.IsNil)
+
+	// Cross-merge.
+	decodedA, err := codec.Decode(&bufA)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(lwwregister.FromCausal[string](decodedA))
+
+	decodedB, err := codec.Decode(&bufB)
+	c.Assert(err, qt.IsNil)
+	alice.Merge(lwwregister.FromCausal[string](decodedB))
+
+	// Both converge to "world" (higher timestamp wins).
+	aliceVal, aliceTs, aliceOk := alice.Value()
+	bobVal, bobTs, bobOk := bob.Value()
+	c.Assert(aliceOk, qt.IsTrue)
+	c.Assert(bobOk, qt.IsTrue)
+	c.Assert(aliceVal, qt.Equals, "world")
+	c.Assert(bobVal, qt.Equals, "world")
+	c.Assert(aliceTs, qt.Equals, int64(200))
+	c.Assert(bobTs, qt.Equals, int64(200))
+}
+
+// --- PNCounter codec ---
+
+type counterValueCodec struct{}
+
+func (counterValueCodec) Encode(w io.Writer, v pncounter.CounterValue) error {
+	return (dotcontext.Int64Codec{}).Encode(w, v.N)
+}
+
+func (counterValueCodec) Decode(r io.Reader) (pncounter.CounterValue, error) {
+	n, err := (dotcontext.Int64Codec{}).Decode(r)
+	return pncounter.CounterValue{N: n}, err
+}
+
+type counterDeltaCodec struct {
+	inner dotcontext.CausalCodec[*dotcontext.DotFun[pncounter.CounterValue]]
+}
+
+func newCounterDeltaCodec() counterDeltaCodec {
+	return counterDeltaCodec{
+		inner: dotcontext.CausalCodec[*dotcontext.DotFun[pncounter.CounterValue]]{
+			StoreCodec: dotcontext.DotFunCodec[pncounter.CounterValue]{
+				ValueCodec: counterValueCodec{},
+			},
+		},
+	}
+}
+
+func (c counterDeltaCodec) Encode(w io.Writer, v dotcontext.Causal[*dotcontext.DotFun[pncounter.CounterValue]]) error {
+	return c.inner.Encode(w, v)
+}
+
+func (c counterDeltaCodec) Decode(r io.Reader) (dotcontext.Causal[*dotcontext.DotFun[pncounter.CounterValue]], error) {
+	return c.inner.Decode(r)
+}
+
+// TestE2EPNCounterAcrossWire verifies that PNCounter deltas
+// (DotFun-based with CounterValue lattice) survive encode→decode→merge
+// and that concurrent increments sum correctly across the wire.
+func TestE2EPNCounterAcrossWire(t *testing.T) {
+	c := qt.New(t)
+	codec := newCounterDeltaCodec()
+
+	alice := pncounter.New("alice")
+	bob := pncounter.New("bob")
+
+	// Concurrent increments: alice +5, bob +3.
+	aliceDelta := alice.Increment(5)
+	bobDelta := bob.Increment(3)
+
+	// Encode both deltas.
+	var bufA, bufB bytes.Buffer
+	c.Assert(codec.Encode(&bufA, aliceDelta.State()), qt.IsNil)
+	c.Assert(codec.Encode(&bufB, bobDelta.State()), qt.IsNil)
+
+	// Cross-merge.
+	decodedA, err := codec.Decode(&bufA)
+	c.Assert(err, qt.IsNil)
+	bob.Merge(pncounter.FromCausal(decodedA))
+
+	decodedB, err := codec.Decode(&bufB)
+	c.Assert(err, qt.IsNil)
+	alice.Merge(pncounter.FromCausal(decodedB))
+
+	// Both converge to 8 (sum of contributions).
+	c.Assert(alice.Value(), qt.Equals, int64(8))
+	c.Assert(bob.Value(), qt.Equals, int64(8))
 }

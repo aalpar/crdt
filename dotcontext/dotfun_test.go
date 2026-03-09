@@ -102,3 +102,17 @@ func TestDotFunDots(t *testing.T) {
 
 	c.Assert(f.Dots().Len(), qt.Equals, 2)
 }
+
+func TestDotFunDotsReturnsClone(t *testing.T) {
+	c := qt.New(t)
+	f := NewDotFun[maxInt]()
+	f.Set(Dot{ID: "a", Seq: 1}, 10)
+
+	dots := f.Dots()
+	dots.Add(Dot{ID: "b", Seq: 2})
+
+	// Original should be unaffected.
+	c.Assert(f.Len(), qt.Equals, 1)
+	_, ok := f.Get(Dot{ID: "b", Seq: 2})
+	c.Assert(ok, qt.IsFalse)
+}
