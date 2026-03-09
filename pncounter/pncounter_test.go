@@ -264,7 +264,7 @@ func TestOneDotPerReplica(t *testing.T) {
 	c.Assert(r.Value(), qt.Equals, int64(5))
 }
 
-func TestTwoReplicasSeparateDots(t *testing.T) {
+func TestIncrementReplacesOnlyOwnDot(t *testing.T) {
 	c := qt.New(t)
 	a := New("a")
 	b := New("b")
