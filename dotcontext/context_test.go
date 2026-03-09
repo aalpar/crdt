@@ -314,6 +314,109 @@ func TestCausalContextMissingMixed(t *testing.T) {
 	c.Assert(missingEqual(got, want), qt.IsTrue, qt.Commentf("got %v, want %v", got, want))
 }
 
+// --- Add edge cases ---
+
+func TestCausalContextAddDuplicate(t *testing.T) {
+	c := qt.New(t)
+	cc := New()
+	cc.Add(Dot{ID: "a", Seq: 1})
+	cc.Add(Dot{ID: "a", Seq: 1}) // duplicate — already in VV
+	c.Assert(cc.Has(Dot{ID: "a", Seq: 1}), qt.IsTrue)
+	c.Assert(cc.Max("a"), qt.Equals, uint64(1))
+}
+
+func TestCausalContextAddDuplicateOutlier(t *testing.T) {
+	c := qt.New(t)
+	cc := New()
+	cc.Add(Dot{ID: "a", Seq: 3}) // outlier
+	cc.Add(Dot{ID: "a", Seq: 3}) // duplicate outlier
+	c.Assert(cc.Has(Dot{ID: "a", Seq: 3}), qt.IsTrue)
+}
+
+// --- Merge properties ---
+
+func TestCausalContextMergeIdempotent(t *testing.T) {
+	c := qt.New(t)
+	cc := New()
+	cc.Add(Dot{ID: "a", Seq: 1})
+	cc.Add(Dot{ID: "a", Seq: 2})
+	cc.Add(Dot{ID: "b", Seq: 1})
+
+	before := cc.Clone()
+	cc.Merge(cc)
+
+	c.Assert(cc.Max("a"), qt.Equals, before.Max("a"))
+	c.Assert(cc.Max("b"), qt.Equals, before.Max("b"))
+}
+
+func TestCausalContextMergeCommutative(t *testing.T) {
+	c := qt.New(t)
+	a := New()
+	a.Add(Dot{ID: "x", Seq: 1})
+	a.Add(Dot{ID: "x", Seq: 2})
+
+	b := New()
+	b.Add(Dot{ID: "x", Seq: 3})
+	b.Add(Dot{ID: "y", Seq: 1})
+
+	ab := a.Clone()
+	ab.Merge(b)
+
+	ba := b.Clone()
+	ba.Merge(a)
+
+	for _, d := range []Dot{
+		{ID: "x", Seq: 1}, {ID: "x", Seq: 2},
+		{ID: "x", Seq: 3}, {ID: "y", Seq: 1},
+	} {
+		c.Assert(ab.Has(d), qt.Equals, ba.Has(d), qt.Commentf("dot %v", d))
+	}
+}
+
+// --- Compact edge cases ---
+
+func TestCausalContextCompactEmpty(t *testing.T) {
+	c := qt.New(t)
+	cc := New()
+	cc.Compact() // should not panic
+	c.Assert(cc.Max("a"), qt.Equals, uint64(0))
+}
+
+func TestCausalContextCompactNoOutliers(t *testing.T) {
+	c := qt.New(t)
+	cc := New()
+	cc.Next("a")
+	cc.Next("a")
+	cc.Compact() // nothing to promote
+	c.Assert(cc.Max("a"), qt.Equals, uint64(2))
+}
+
+// --- ReplicaIDs ---
+
+func TestCausalContextReplicaIDs(t *testing.T) {
+	c := qt.New(t)
+	cc := New()
+	cc.Add(Dot{ID: "a", Seq: 1})
+	cc.Add(Dot{ID: "b", Seq: 1})
+	cc.Add(Dot{ID: "c", Seq: 5}) // outlier — c only via outliers
+
+	ids := cc.ReplicaIDs()
+	seen := make(map[ReplicaID]bool)
+	for _, id := range ids {
+		seen[id] = true
+	}
+	c.Assert(seen["a"], qt.IsTrue)
+	c.Assert(seen["b"], qt.IsTrue)
+	c.Assert(seen["c"], qt.IsTrue)
+	c.Assert(len(ids), qt.Equals, 3)
+}
+
+func TestCausalContextReplicaIDsEmpty(t *testing.T) {
+	c := qt.New(t)
+	cc := New()
+	c.Assert(cc.ReplicaIDs(), qt.HasLen, 0)
+}
+
 func TestMergeRanges(t *testing.T) {
 	c := qt.New(t)
 

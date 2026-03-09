@@ -191,6 +191,146 @@ func TestJoinDotMapKeyOnlyOneSide(t *testing.T) {
 	c.Assert(v.Has(d), qt.IsTrue)
 }
 
+// --- JoinDotSet edge cases ---
+
+func TestJoinDotSetBothEmpty(t *testing.T) {
+	c := qt.New(t)
+	a := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
+	b := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
+	result := JoinDotSet(a, b)
+	c.Assert(result.Store.Len(), qt.Equals, 0)
+}
+
+func TestJoinDotSetNonEmptyWithEmpty(t *testing.T) {
+	c := qt.New(t)
+	d := Dot{ID: "a", Seq: 1}
+	a := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
+	a.Store.Add(d)
+	a.Context.Add(d)
+
+	empty := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
+
+	// a ⊔ empty — dot survives (not in empty's context).
+	result := JoinDotSet(a, empty)
+	c.Assert(result.Store.Has(d), qt.IsTrue)
+
+	// empty ⊔ a — same by commutativity.
+	result2 := JoinDotSet(empty, a)
+	c.Assert(result2.Store.Has(d), qt.IsTrue)
+}
+
+func TestJoinDotSetContextMerged(t *testing.T) {
+	c := qt.New(t)
+	da := Dot{ID: "a", Seq: 1}
+	db := Dot{ID: "b", Seq: 1}
+
+	a := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
+	a.Store.Add(da)
+	a.Context.Add(da)
+
+	b := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
+	b.Context.Add(db) // observed but removed
+
+	result := JoinDotSet(a, b)
+	// Output context should contain both.
+	c.Assert(result.Context.Has(da), qt.IsTrue)
+	c.Assert(result.Context.Has(db), qt.IsTrue)
+}
+
+// --- JoinDotFun edge cases ---
+
+func TestJoinDotFunBothEmpty(t *testing.T) {
+	c := qt.New(t)
+	a := Causal[*DotFun[maxInt]]{Store: NewDotFun[maxInt](), Context: New()}
+	b := Causal[*DotFun[maxInt]]{Store: NewDotFun[maxInt](), Context: New()}
+	result := JoinDotFun(a, b)
+	c.Assert(result.Store.Len(), qt.Equals, 0)
+}
+
+func TestJoinDotFunNonEmptyWithEmpty(t *testing.T) {
+	c := qt.New(t)
+	d := Dot{ID: "a", Seq: 1}
+	a := Causal[*DotFun[maxInt]]{Store: NewDotFun[maxInt](), Context: New()}
+	a.Store.Set(d, 42)
+	a.Context.Add(d)
+
+	empty := Causal[*DotFun[maxInt]]{Store: NewDotFun[maxInt](), Context: New()}
+
+	result := JoinDotFun(a, empty)
+	v, ok := result.Store.Get(d)
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v, qt.Equals, maxInt(42))
+}
+
+// --- JoinDotMap edge cases ---
+
+func TestJoinDotMapBothEmpty(t *testing.T) {
+	c := qt.New(t)
+	joinDS := func(x, y Causal[*DotSet]) Causal[*DotSet] { return JoinDotSet(x, y) }
+	a := Causal[*DotMap[string, *DotSet]]{Store: NewDotMap[string, *DotSet](), Context: New()}
+	b := Causal[*DotMap[string, *DotSet]]{Store: NewDotMap[string, *DotSet](), Context: New()}
+	result := JoinDotMap(a, b, joinDS, NewDotSet)
+	c.Assert(result.Store.Len(), qt.Equals, 0)
+}
+
+func TestJoinDotMapKeyRemovedByContext(t *testing.T) {
+	c := qt.New(t)
+	d := Dot{ID: "a", Seq: 1}
+	joinDS := func(x, y Causal[*DotSet]) Causal[*DotSet] { return JoinDotSet(x, y) }
+
+	// a has key "x" with dot d.
+	a := Causal[*DotMap[string, *DotSet]]{Store: NewDotMap[string, *DotSet](), Context: New()}
+	sa := NewDotSet()
+	sa.Add(d)
+	a.Store.Set("x", sa)
+	a.Context.Add(d)
+
+	// b has no keys but has observed d (removal).
+	b := Causal[*DotMap[string, *DotSet]]{Store: NewDotMap[string, *DotSet](), Context: New()}
+	b.Context.Add(d)
+
+	result := JoinDotMap(a, b, joinDS, NewDotSet)
+	// Key "x" should be gone — its only dot is in b's context.
+	_, ok := result.Store.Get("x")
+	c.Assert(ok, qt.IsFalse)
+}
+
+func TestJoinDotMapKeyOnlyInB(t *testing.T) {
+	c := qt.New(t)
+	d := Dot{ID: "b", Seq: 1}
+	joinDS := func(x, y Causal[*DotSet]) Causal[*DotSet] { return JoinDotSet(x, y) }
+
+	a := Causal[*DotMap[string, *DotSet]]{Store: NewDotMap[string, *DotSet](), Context: New()}
+
+	b := Causal[*DotMap[string, *DotSet]]{Store: NewDotMap[string, *DotSet](), Context: New()}
+	sb := NewDotSet()
+	sb.Add(d)
+	b.Store.Set("y", sb)
+	b.Context.Add(d)
+
+	result := JoinDotMap(a, b, joinDS, NewDotSet)
+	v, ok := result.Store.Get("y")
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(v.Has(d), qt.IsTrue)
+}
+
+func TestJoinDotMapContextMerged(t *testing.T) {
+	c := qt.New(t)
+	da := Dot{ID: "a", Seq: 1}
+	db := Dot{ID: "b", Seq: 1}
+	joinDS := func(x, y Causal[*DotSet]) Causal[*DotSet] { return JoinDotSet(x, y) }
+
+	a := Causal[*DotMap[string, *DotSet]]{Store: NewDotMap[string, *DotSet](), Context: New()}
+	a.Context.Add(da)
+
+	b := Causal[*DotMap[string, *DotSet]]{Store: NewDotMap[string, *DotSet](), Context: New()}
+	b.Context.Add(db)
+
+	result := JoinDotMap(a, b, joinDS, NewDotSet)
+	c.Assert(result.Context.Has(da), qt.IsTrue)
+	c.Assert(result.Context.Has(db), qt.IsTrue)
+}
+
 // --- Semilattice property tests ---
 
 func makeTestCausalDotSet(dots []Dot) Causal[*DotSet] {
