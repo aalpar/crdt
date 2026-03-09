@@ -278,3 +278,52 @@ func TestE2EIncrementalSync(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(n, qt.Equals, 0)
 }
+
+// TestE2ERemoveDeltaAcrossWire verifies that a remove delta (empty store,
+// non-empty context) survives encode→decode→merge and produces the
+// correct result on the receiving replica.
+//
+// Remove deltas generate no new dot, so they can't be keyed in the
+// DeltaStore or discovered via Missing()/Fetch(). This test encodes
+// the delta directly to verify the wire format handles the empty-store
+// case and the merge correctly removes the element.
+func TestE2ERemoveDeltaAcrossWire(t *testing.T) {
+	c := qt.New(t)
+	codec := newAWSetDeltaCodec()
+
+	alice := newReplica("alice", "bob")
+	bob := newReplica("bob", "alice")
+
+	// Both replicas start with "x" and "y".
+	alice.add("x")
+	alice.add("y")
+	_, err := sync(alice, bob, codec)
+	c.Assert(err, qt.IsNil)
+	c.Assert(bob.set.Has("x"), qt.IsTrue)
+	c.Assert(bob.set.Has("y"), qt.IsTrue)
+
+	// Bob removes "y". The delta has an empty store and a context
+	// containing y's dots — encoding this exercises the empty-DotMap
+	// wire path.
+	removeDelta := bob.set.Remove("y")
+	c.Assert(bob.set.Has("y"), qt.IsFalse)
+
+	// Encode the remove delta directly (bypassing DeltaStore).
+	var buf bytes.Buffer
+	err = codec.Encode(&buf, removeDelta.State())
+	c.Assert(err, qt.IsNil)
+
+	// Decode on Alice's side.
+	decoded, err := codec.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+
+	// The decoded delta should have an empty store but a context that
+	// contains the dots that were in y's DotSet.
+	c.Assert(decoded.Store.Len(), qt.Equals, 0)
+	c.Assert(len(decoded.Context.ReplicaIDs()) > 0, qt.IsTrue)
+
+	// Merge into Alice — "y" should be removed, "x" survives.
+	alice.set.Merge(awset.FromCausal[string](decoded))
+	c.Assert(alice.set.Has("x"), qt.IsTrue, qt.Commentf("x must survive the remove of y"))
+	c.Assert(alice.set.Has("y"), qt.IsFalse, qt.Commentf("y must be removed"))
+}

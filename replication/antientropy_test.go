@@ -2,6 +2,7 @@ package replication
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 
@@ -228,4 +229,58 @@ func TestWriteDeltaBatchMissingNotInStore(t *testing.T) {
 	n, err := WriteDeltaBatch(localCC, remoteCC, store, int64Codec{}, &buf)
 	c.Assert(err, qt.IsNil)
 	c.Assert(n, qt.Equals, 0)
+}
+
+// --- Error propagation ---
+
+var errBrokenWriter = errors.New("broken writer")
+
+type brokenWriter struct{}
+
+func (brokenWriter) Write([]byte) (int, error) { return 0, errBrokenWriter }
+
+// TestWriteDeltaBatchWriterError exercises the error path at
+// antientropy.go:24-25 where codec.Encode fails.
+func TestWriteDeltaBatchWriterError(t *testing.T) {
+	c := qt.New(t)
+
+	localCC := dotcontext.New()
+	localCC.Add(dotcontext.Dot{ID: "a", Seq: 1})
+
+	remoteCC := dotcontext.New()
+	// Remote is missing (a,1).
+
+	store := dotcontext.NewDeltaStore[int64]()
+	store.Add(dotcontext.Dot{ID: "a", Seq: 1}, 10)
+
+	_, err := WriteDeltaBatch(localCC, remoteCC, store, int64Codec{}, brokenWriter{})
+	c.Assert(err, qt.IsNotNil)
+}
+
+// TestReadDeltaBatchDecodeError exercises the error path at
+// antientropy.go:40-42 where codec.Decode fails on truncated input.
+func TestReadDeltaBatchDecodeError(t *testing.T) {
+	c := qt.New(t)
+
+	// Encode a valid batch, then truncate by one byte.
+	localCC := dotcontext.New()
+	localCC.Add(dotcontext.Dot{ID: "a", Seq: 1})
+
+	remoteCC := dotcontext.New()
+
+	store := dotcontext.NewDeltaStore[int64]()
+	store.Add(dotcontext.Dot{ID: "a", Seq: 1}, 10)
+
+	var buf bytes.Buffer
+	n, err := WriteDeltaBatch(localCC, remoteCC, store, int64Codec{}, &buf)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, 1)
+
+	data := buf.Bytes()
+	truncated := bytes.NewReader(data[:len(data)-1])
+
+	_, err = ReadDeltaBatch(int64Codec{}, truncated, func(d dotcontext.Dot, v int64) {
+		c.Fatal("unexpected apply call on truncated input")
+	})
+	c.Assert(err, qt.IsNotNil)
 }
