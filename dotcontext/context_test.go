@@ -417,6 +417,36 @@ func TestCausalContextReplicaIDsEmpty(t *testing.T) {
 	c.Assert(cc.ReplicaIDs(), qt.HasLen, 0)
 }
 
+// --- Missing symmetry ---
+
+func TestCausalContextMissingAsymmetric(t *testing.T) {
+	c := qt.New(t)
+	a := New()
+	a.Next("x") // x:1
+	a.Next("x") // x:2
+	a.Next("y") // y:1
+
+	b := New()
+	b.Next("x") // x:1
+	b.Next("z") // z:1
+
+	// a is missing z:1 from b.
+	aMissing := a.Missing(b)
+	c.Assert(aMissing["z"], qt.HasLen, 1)
+	c.Assert(aMissing["z"][0], qt.Equals, SeqRange{Lo: 1, Hi: 1})
+	_, hasX := aMissing["x"]
+	c.Assert(hasX, qt.IsFalse) // a has x:1 and x:2, b only has x:1
+
+	// b is missing x:2 and y:1 from a.
+	bMissing := b.Missing(a)
+	c.Assert(bMissing["x"], qt.HasLen, 1)
+	c.Assert(bMissing["x"][0], qt.Equals, SeqRange{Lo: 2, Hi: 2})
+	c.Assert(bMissing["y"], qt.HasLen, 1)
+	c.Assert(bMissing["y"][0], qt.Equals, SeqRange{Lo: 1, Hi: 1})
+	_, hasZ := bMissing["z"]
+	c.Assert(hasZ, qt.IsFalse) // b already has z:1
+}
+
 func TestMergeRanges(t *testing.T) {
 	c := qt.New(t)
 

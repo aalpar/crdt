@@ -343,6 +343,69 @@ func TestCausalCodecNestedDotMapRoundTrip(t *testing.T) {
 	c.Assert(got.Context.Has(Dot{ID: "w1", Seq: 1}), qt.IsTrue)
 }
 
+// --- Codec round-trip preserves join semantics ---
+
+func TestCausalCodecRoundTripPreservesJoin(t *testing.T) {
+	c := qt.New(t)
+
+	// Build two Causal[*DotSet] values.
+	da := Dot{ID: "a", Seq: 1}
+	db := Dot{ID: "b", Seq: 1}
+
+	a := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
+	a.Store.Add(da)
+	a.Context.Add(da)
+
+	b := Causal[*DotSet]{Store: NewDotSet(), Context: New()}
+	b.Store.Add(db)
+	b.Context.Add(db)
+
+	// Join before encoding.
+	directJoin := JoinDotSet(a, b)
+
+	// Encode and decode both, then join.
+	cc := CausalCodec[*DotSet]{StoreCodec: DotSetCodec{}}
+
+	var bufA bytes.Buffer
+	c.Assert(cc.Encode(&bufA, a), qt.IsNil)
+	decodedA, err := cc.Decode(&bufA)
+	c.Assert(err, qt.IsNil)
+
+	var bufB bytes.Buffer
+	c.Assert(cc.Encode(&bufB, b), qt.IsNil)
+	decodedB, err := cc.Decode(&bufB)
+	c.Assert(err, qt.IsNil)
+
+	roundTripJoin := JoinDotSet(decodedA, decodedB)
+
+	// Results should be identical.
+	c.Assert(dotSetEqual(directJoin.Store, roundTripJoin.Store), qt.IsTrue)
+	c.Assert(directJoin.Context.Has(da), qt.Equals, roundTripJoin.Context.Has(da))
+	c.Assert(directJoin.Context.Has(db), qt.Equals, roundTripJoin.Context.Has(db))
+}
+
+func TestCausalContextCodecPreservesOutliers(t *testing.T) {
+	c := qt.New(t)
+	ccc := CausalContextCodec{}
+
+	cc := New()
+	cc.Add(Dot{ID: "a", Seq: 1})
+	cc.Add(Dot{ID: "a", Seq: 3}) // outlier
+	cc.Add(Dot{ID: "a", Seq: 5}) // outlier
+
+	var buf bytes.Buffer
+	c.Assert(ccc.Encode(&buf, cc), qt.IsNil)
+	decoded, err := ccc.Decode(&buf)
+	c.Assert(err, qt.IsNil)
+
+	// Outliers should survive encoding — not compacted during codec.
+	c.Assert(decoded.Has(Dot{ID: "a", Seq: 1}), qt.IsTrue)
+	c.Assert(decoded.Has(Dot{ID: "a", Seq: 2}), qt.IsFalse) // gap
+	c.Assert(decoded.Has(Dot{ID: "a", Seq: 3}), qt.IsTrue)
+	c.Assert(decoded.Has(Dot{ID: "a", Seq: 4}), qt.IsFalse) // gap
+	c.Assert(decoded.Has(Dot{ID: "a", Seq: 5}), qt.IsTrue)
+}
+
 // --- Fuzz targets ---
 
 func FuzzDecodeDotSet(f *testing.F) {
