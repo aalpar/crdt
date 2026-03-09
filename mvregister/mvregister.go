@@ -34,6 +34,45 @@ func New[V any](replicaID dotcontext.ReplicaID) *MVRegister[V] {
 	}
 }
 
+// Write sets the register value and returns a delta for replication.
+//
+// All previous values are superseded: their dots are recorded in the
+// delta's context so that remote replicas remove them on merge.
+func (r *MVRegister[V]) Write(v V) *MVRegister[V] {
+	// Collect old dots before generating the new one.
+	var oldDots []dotcontext.Dot
+	r.state.Store.Range(func(d dotcontext.Dot, _ Value[V]) bool {
+		oldDots = append(oldDots, d)
+		return true
+	})
+
+	// Generate new dot and write locally.
+	d := r.state.Context.Next(r.id)
+	for _, od := range oldDots {
+		r.state.Store.Remove(od)
+	}
+	entry := Value[V]{V: v}
+	r.state.Store.Set(d, entry)
+
+	// Build delta: store has only the new entry, context has
+	// the new dot plus all old dots (so receivers remove them).
+	deltaStore := dotcontext.NewDotFun[Value[V]]()
+	deltaStore.Set(d, entry)
+
+	deltaCtx := dotcontext.New()
+	deltaCtx.Add(d)
+	for _, od := range oldDots {
+		deltaCtx.Add(od)
+	}
+
+	return &MVRegister[V]{
+		state: dotcontext.Causal[*dotcontext.DotFun[Value[V]]]{
+			Store:   deltaStore,
+			Context: deltaCtx,
+		},
+	}
+}
+
 // Values returns all concurrently-written values. In quiescent state
 // (no unmerged concurrent writes), this returns zero or one value.
 // The order is non-deterministic.
