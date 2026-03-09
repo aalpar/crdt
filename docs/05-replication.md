@@ -280,9 +280,10 @@ For add-wins conflict:
    → "x" is back with dot {alice:2}
 
 4. Sync bob → alice
-   → Alice merges bob's remove delta: context {alice:1} kills nothing
-     (alice:1 is already superseded by alice:2)
-   → "x" survives on both.
+   → Alice merges bob's remove delta: context {alice:1} removes
+     alice:1 from x's dot set, but alice:2 is not in bob's context
+     so it survives
+   → "x" remains with dot {alice:2} on both sides.
 ```
 
 ## Remove Deltas: A Special Case

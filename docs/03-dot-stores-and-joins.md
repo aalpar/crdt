@@ -2,8 +2,9 @@
 
 ## The Algebra Layer
 
-We've established that every mutation gets a unique dot, and every
-replica tracks which dots it has observed via a causal context. Now we
+We've established that state-introducing mutations get unique dots,
+and every replica tracks which dots it has observed via a causal
+context. Now we
 need the data structures that *hold* the dots alongside the actual data,
 and the join functions that merge them.
 

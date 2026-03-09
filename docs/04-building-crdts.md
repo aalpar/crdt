@@ -18,8 +18,9 @@ composition.
 
 ## The Delta Mutator Pattern
 
-All mutators in this library follow one pattern. It's worth seeing
-the full shape before diving into individual CRDTs:
+Mutators that *introduce* new state (Add, Set, Increment, Enable)
+all follow one pattern. It's worth seeing the full shape before
+diving into individual CRDTs:
 
 ```go
 func (s *SomeCRDT) Mutate(args...) *SomeCRDT {
@@ -37,6 +38,10 @@ func (s *SomeCRDT) Mutate(args...) *SomeCRDT {
     return &SomeCRDT{state: delta}
 }
 ```
+
+Mutators that only *remove* state (Remove, Disable) follow a
+different shape: no dot generation, just record existing dots in the
+delta's context and clear them from the local store.
 
 Two things to note:
 
