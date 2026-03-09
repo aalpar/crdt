@@ -819,18 +819,18 @@ func TestE2EPNCounterDecrementAcrossWire(t *testing.T) {
 
 type mvrValueStringCodec struct{}
 
-func (mvrValueStringCodec) Encode(w io.Writer, v mvregister.Value[string]) error {
-	return (dotcontext.StringCodec{}).Encode(w, v.V)
+func (mvrValueStringCodec) Encode(w io.Writer, v mvregister.Entry[string]) error {
+	return (dotcontext.StringCodec{}).Encode(w, v.Val)
 }
 
-func (mvrValueStringCodec) Decode(r io.Reader) (mvregister.Value[string], error) {
+func (mvrValueStringCodec) Decode(r io.Reader) (mvregister.Entry[string], error) {
 	s, err := (dotcontext.StringCodec{}).Decode(r)
-	return mvregister.Value[string]{V: s}, err
+	return mvregister.Entry[string]{Val: s}, err
 }
 
-func newMVRCodec() dotcontext.CausalCodec[*dotcontext.DotFun[mvregister.Value[string]]] {
-	return dotcontext.CausalCodec[*dotcontext.DotFun[mvregister.Value[string]]]{
-		StoreCodec: dotcontext.DotFunCodec[mvregister.Value[string]]{
+func newMVRCodec() dotcontext.CausalCodec[*dotcontext.DotFun[mvregister.Entry[string]]] {
+	return dotcontext.CausalCodec[*dotcontext.DotFun[mvregister.Entry[string]]]{
+		StoreCodec: dotcontext.DotFunCodec[mvregister.Entry[string]]{
 			ValueCodec: mvrValueStringCodec{},
 		},
 	}

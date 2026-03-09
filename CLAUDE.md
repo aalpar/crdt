@@ -48,7 +48,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 | `ormap/` | `ORMap[K, V]` | `DotMap[K, V DotStore]` | Add-wins keys, recursive value merge |
 | `ewflag/` | `EWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → enable wins |
 | `dwflag/` | `DWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → disable wins |
-| `mvregister/` | `MVRegister[V]` | `DotFun[Value[V]]` | All concurrent writes preserved |
+| `mvregister/` | `MVRegister[V]` | `DotFun[Entry[V]]` | All concurrent writes preserved |
 
 ### Key Design Decisions
 

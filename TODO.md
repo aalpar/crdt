@@ -53,7 +53,7 @@
 - [x] E2E replication tests for RWSet — 3 tests: remove-wins across wire, concurrent adds across wire, re-add after remove cycle. DWFlag and GCounter still missing (lower priority — structurally identical to tested EWFlag/PNCounter).
 - [x] PNCounter/GCounter near-duplication — cross-referenced both files with NOTE comments linking the shared pattern.
 - [ ] `DotMap.Clone()` is shallow — nested DotStore values are shared with the original. `DotSet.Clone()` and `DotFun.Clone()` are deep. The in-place merge optimization (above) would make this a correctness bug. Rename to `ShallowClone()` or make deep.
-- [ ] `mvregister.Value[V]` naming — wrapper type `Value[V]` with field `V V` creates confusing `entry.V` access. Other CRDTs use descriptive names (`CounterValue`, `GValue`, `Presence`, `Timestamped`). Rename to e.g. `Entry[V]` with field `Val`.
+- [x] `mvregister.Value[V]` naming — renamed to `Entry[V]` with field `Val`, consistent with `CounterValue`, `GValue`, `Presence`, `Timestamped`.
 - [ ] RWSet missing per-package `TestDeltaPropagation` — every other CRDT has one; the shared harness covers it generically but the pattern break is a consistency gap.
 - [ ] CRDT-level fuzz tests beyond AWSet — `awset/fuzz_test.go` found 2 bugs. RWSet (complex `Has` semantics) and ORMap (recursive join + Apply callback) are the highest-value targets.
 - [ ] `DeltaStore.Fetch` scales linearly — O(|store| × |ranges|) scan. Fine while GC keeps the store small; add a per-replica secondary index if a peer-offline scenario causes buildup.

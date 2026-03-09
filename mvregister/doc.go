@@ -2,7 +2,7 @@
 // CRDT where concurrent writes are all preserved rather than resolved
 // by a total order.
 //
-// The implementation composes DotFun[Value[V]] from the dotcontext
+// The implementation composes DotFun[Entry[V]] from the dotcontext
 // package. Each write generates a new dot and associates it with the
 // value. When concurrent writes produce multiple surviving dots after
 // merge, the read query returns all coexisting values. A subsequent

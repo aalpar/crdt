@@ -4,31 +4,31 @@ import (
 	"github.com/aalpar/crdt/dotcontext"
 )
 
-// Value wraps a user value to satisfy the dotcontext.Lattice constraint.
+// Entry wraps a user value to satisfy the dotcontext.Lattice constraint.
 // For MVRegister, the join is trivial: two entries sharing the same dot
 // always hold the same value, so Join simply returns the receiver.
-type Value[V any] struct {
-	V V
+type Entry[V any] struct {
+	Val V
 }
 
-func (v Value[V]) Join(other Value[V]) Value[V] { return v }
+func (v Entry[V]) Join(other Entry[V]) Entry[V] { return v }
 
 // MVRegister is a multi-value register. Concurrent writes are all
 // preserved — Values() returns every concurrently-written value.
 // A subsequent write from any replica supersedes all existing values.
 //
-// Internally it is a DotFun[Value[V]] paired with a causal context.
+// Internally it is a DotFun[Entry[V]] paired with a causal context.
 type MVRegister[V any] struct {
 	id    dotcontext.ReplicaID
-	state dotcontext.Causal[*dotcontext.DotFun[Value[V]]]
+	state dotcontext.Causal[*dotcontext.DotFun[Entry[V]]]
 }
 
 // New creates an empty MVRegister for the given replica.
 func New[V any](replicaID dotcontext.ReplicaID) *MVRegister[V] {
 	return &MVRegister[V]{
 		id: replicaID,
-		state: dotcontext.Causal[*dotcontext.DotFun[Value[V]]]{
-			Store:   dotcontext.NewDotFun[Value[V]](),
+		state: dotcontext.Causal[*dotcontext.DotFun[Entry[V]]]{
+			Store:   dotcontext.NewDotFun[Entry[V]](),
 			Context: dotcontext.New(),
 		},
 	}
@@ -41,7 +41,7 @@ func New[V any](replicaID dotcontext.ReplicaID) *MVRegister[V] {
 func (r *MVRegister[V]) Write(v V) *MVRegister[V] {
 	// Collect old dots before generating the new one.
 	var oldDots []dotcontext.Dot
-	r.state.Store.Range(func(d dotcontext.Dot, _ Value[V]) bool {
+	r.state.Store.Range(func(d dotcontext.Dot, _ Entry[V]) bool {
 		oldDots = append(oldDots, d)
 		return true
 	})
@@ -51,12 +51,12 @@ func (r *MVRegister[V]) Write(v V) *MVRegister[V] {
 	for _, od := range oldDots {
 		r.state.Store.Remove(od)
 	}
-	entry := Value[V]{V: v}
+	entry := Entry[V]{Val: v}
 	r.state.Store.Set(d, entry)
 
 	// Build delta: store has only the new entry, context has
 	// the new dot plus all old dots (so receivers remove them).
-	deltaStore := dotcontext.NewDotFun[Value[V]]()
+	deltaStore := dotcontext.NewDotFun[Entry[V]]()
 	deltaStore.Set(d, entry)
 
 	deltaCtx := dotcontext.New()
@@ -66,7 +66,7 @@ func (r *MVRegister[V]) Write(v V) *MVRegister[V] {
 	}
 
 	return &MVRegister[V]{
-		state: dotcontext.Causal[*dotcontext.DotFun[Value[V]]]{
+		state: dotcontext.Causal[*dotcontext.DotFun[Entry[V]]]{
 			Store:   deltaStore,
 			Context: deltaCtx,
 		},
@@ -74,13 +74,13 @@ func (r *MVRegister[V]) Write(v V) *MVRegister[V] {
 }
 
 // State returns the MVRegister's internal Causal state for serialization.
-func (r *MVRegister[V]) State() dotcontext.Causal[*dotcontext.DotFun[Value[V]]] {
+func (r *MVRegister[V]) State() dotcontext.Causal[*dotcontext.DotFun[Entry[V]]] {
 	return r.state
 }
 
 // FromCausal constructs an MVRegister from a decoded Causal value.
 // Used to reconstruct deltas from the wire for merging.
-func FromCausal[V any](state dotcontext.Causal[*dotcontext.DotFun[Value[V]]]) *MVRegister[V] {
+func FromCausal[V any](state dotcontext.Causal[*dotcontext.DotFun[Entry[V]]]) *MVRegister[V] {
 	return &MVRegister[V]{state: state}
 }
 
@@ -94,8 +94,8 @@ func (r *MVRegister[V]) Merge(other *MVRegister[V]) {
 // The order is non-deterministic.
 func (r *MVRegister[V]) Values() []V {
 	var vals []V
-	r.state.Store.Range(func(_ dotcontext.Dot, entry Value[V]) bool {
-		vals = append(vals, entry.V)
+	r.state.Store.Range(func(_ dotcontext.Dot, entry Entry[V]) bool {
+		vals = append(vals, entry.Val)
 		return true
 	})
 	return vals
