@@ -25,430 +25,473 @@ func addDot(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontex
 	delta.Add(d)
 }
 
-func TestNewEmpty(t *testing.T) {
+func TestBasicOps(t *testing.T) {
 	c := qt.New(t)
-	m := newSetMap("a")
-	c.Assert(m.Len(), qt.Equals, 0)
-	c.Assert(m.Has("x"), qt.IsFalse)
-	c.Assert(m.Keys(), qt.HasLen, 0)
-}
 
-func TestApplyCreatesKey(t *testing.T) {
-	c := qt.New(t)
-	m := newSetMap("a")
-	m.Apply("x", addDot)
+	c.Run("NewEmpty", func(c *qt.C) {
+		m := newSetMap("a")
+		c.Assert(m.Len(), qt.Equals, 0)
+		c.Assert(m.Has("x"), qt.IsFalse)
+		c.Assert(m.Keys(), qt.HasLen, 0)
+	})
 
-	c.Assert(m.Has("x"), qt.IsTrue)
-	c.Assert(m.Len(), qt.Equals, 1)
-	v, ok := m.Get("x")
-	c.Assert(ok, qt.IsTrue)
-	c.Assert(v.Len(), qt.Equals, 1)
-}
+	c.Run("ApplyCreatesKey", func(c *qt.C) {
+		m := newSetMap("a")
+		m.Apply("x", addDot)
 
-func TestApplyMultipleKeys(t *testing.T) {
-	c := qt.New(t)
-	m := newSetMap("a")
-	m.Apply("x", addDot)
-	m.Apply("y", addDot)
-	m.Apply("z", addDot)
-
-	keys := m.Keys()
-	slices.Sort(keys)
-	c.Assert(keys, qt.DeepEquals, []string{"x", "y", "z"})
-}
-
-func TestApplyAccumulatesDots(t *testing.T) {
-	c := qt.New(t)
-	m := newSetMap("a")
-	m.Apply("x", addDot)
-	m.Apply("x", addDot)
-
-	v, _ := m.Get("x")
-	c.Assert(v.Len(), qt.Equals, 2)
-}
-
-func TestApplyReturnsValidDelta(t *testing.T) {
-	c := qt.New(t)
-	m := newSetMap("a")
-	delta := m.Apply("x", addDot)
-
-	c.Assert(delta.Has("x"), qt.IsTrue)
-	c.Assert(delta.Len(), qt.Equals, 1)
-}
-
-func TestRemove(t *testing.T) {
-	c := qt.New(t)
-	m := newSetMap("a")
-	m.Apply("x", addDot)
-	m.Apply("y", addDot)
-	m.Remove("x")
-
-	c.Assert(m.Has("x"), qt.IsFalse)
-	c.Assert(m.Has("y"), qt.IsTrue)
-}
-
-func TestRemoveAbsent(t *testing.T) {
-	c := qt.New(t)
-	m := newSetMap("a")
-	m.Remove("ghost") // should not panic
-	c.Assert(m.Len(), qt.Equals, 0)
-}
-
-// --- Delta propagation ---
-
-func TestMergeDelta(t *testing.T) {
-	c := qt.New(t)
-	a := newSetMap("a")
-	b := newSetMap("b")
-
-	delta := a.Apply("x", addDot)
-	b.Merge(delta)
-
-	c.Assert(b.Has("x"), qt.IsTrue)
-}
-
-func TestMergeRemoveDelta(t *testing.T) {
-	c := qt.New(t)
-	a := newSetMap("a")
-	b := newSetMap("b")
-
-	addDelta := a.Apply("x", addDot)
-	b.Merge(addDelta)
-
-	rmDelta := a.Remove("x")
-	b.Merge(rmDelta)
-
-	c.Assert(b.Has("x"), qt.IsFalse)
-}
-
-// --- Add-wins semantics ---
-
-func TestAddWinsConcurrent(t *testing.T) {
-	c := qt.New(t)
-	a := newSetMap("a")
-	b := newSetMap("b")
-
-	addDelta := a.Apply("x", addDot)
-	b.Merge(addDelta)
-
-	rmDelta := a.Remove("x")
-	addDelta2 := b.Apply("x", addDot)
-
-	a.Merge(addDelta2)
-	b.Merge(rmDelta)
-
-	c.Assert(a.Has("x"), qt.IsTrue)
-	c.Assert(b.Has("x"), qt.IsTrue)
-}
-
-func TestConcurrentApplyDifferentKeys(t *testing.T) {
-	c := qt.New(t)
-	a := newSetMap("a")
-	b := newSetMap("b")
-
-	da := a.Apply("x", addDot)
-	db := b.Apply("y", addDot)
-
-	a.Merge(db)
-	b.Merge(da)
-
-	for _, m := range []*ORMap[string, *dotcontext.DotSet]{a, b} {
-		keys := m.Keys()
-		slices.Sort(keys)
-		c.Assert(keys, qt.DeepEquals, []string{"x", "y"})
-	}
-}
-
-func TestConcurrentApplySameKey(t *testing.T) {
-	c := qt.New(t)
-	a := newSetMap("a")
-	b := newSetMap("b")
-
-	da := a.Apply("x", addDot)
-	db := b.Apply("x", addDot)
-
-	a.Merge(db)
-	b.Merge(da)
-
-	for _, m := range []*ORMap[string, *dotcontext.DotSet]{a, b} {
+		c.Assert(m.Has("x"), qt.IsTrue)
+		c.Assert(m.Len(), qt.Equals, 1)
 		v, ok := m.Get("x")
 		c.Assert(ok, qt.IsTrue)
-		c.Assert(v.Len(), qt.Equals, 2)
-	}
-}
+		c.Assert(v.Len(), qt.Equals, 1)
+	})
 
-// --- Merge properties ---
+	c.Run("ApplyMultipleKeys", func(c *qt.C) {
+		m := newSetMap("a")
+		m.Apply("x", addDot)
+		m.Apply("y", addDot)
+		m.Apply("z", addDot)
 
-func TestMergeIdempotent(t *testing.T) {
-	c := qt.New(t)
-	a := newSetMap("a")
-	a.Apply("x", addDot)
-
-	snapshot := newSetMap("x")
-	snapshot.Merge(a)
-
-	a.Merge(snapshot)
-	a.Merge(snapshot)
-
-	c.Assert(a.Len(), qt.Equals, 1)
-}
-
-func TestMergeCommutative(t *testing.T) {
-	c := qt.New(t)
-	a := newSetMap("a")
-	b := newSetMap("b")
-	a.Apply("x", addDot)
-	b.Apply("y", addDot)
-
-	ab := newSetMap("x")
-	ab.Merge(a)
-	ab.Merge(b)
-
-	ba := newSetMap("x")
-	ba.Merge(b)
-	ba.Merge(a)
-
-	abKeys := ab.Keys()
-	baKeys := ba.Keys()
-	slices.Sort(abKeys)
-	slices.Sort(baKeys)
-	c.Assert(abKeys, qt.DeepEquals, baKeys)
-}
-
-func TestDeltaIncrementalEqualsFullMerge(t *testing.T) {
-	c := qt.New(t)
-	a := newSetMap("a")
-	d1 := a.Apply("x", addDot)
-	d2 := a.Apply("y", addDot)
-
-	inc := newSetMap("b")
-	inc.Merge(d1)
-	inc.Merge(d2)
-
-	full := newSetMap("b")
-	full.Merge(a)
-
-	incKeys := inc.Keys()
-	fullKeys := full.Keys()
-	slices.Sort(incKeys)
-	slices.Sort(fullKeys)
-	c.Assert(incKeys, qt.DeepEquals, fullKeys)
-}
-
-// --- Three-replica convergence ---
-
-func TestThreeReplicaConvergence(t *testing.T) {
-	c := qt.New(t)
-	a := newSetMap("a")
-	b := newSetMap("b")
-	x := newSetMap("c")
-
-	da := a.Apply("x", addDot)
-	db := b.Apply("y", addDot)
-	dx := x.Apply("z", addDot)
-
-	a.Merge(db)
-	a.Merge(dx)
-	b.Merge(da)
-	b.Merge(dx)
-	x.Merge(da)
-	x.Merge(db)
-
-	want := []string{"x", "y", "z"}
-	for _, m := range []*ORMap[string, *dotcontext.DotSet]{a, b, x} {
 		keys := m.Keys()
 		slices.Sort(keys)
-		c.Assert(keys, qt.DeepEquals, want)
-	}
+		c.Assert(keys, qt.DeepEquals, []string{"x", "y", "z"})
+	})
+
+	c.Run("ApplyAccumulatesDots", func(c *qt.C) {
+		m := newSetMap("a")
+		m.Apply("x", addDot)
+		m.Apply("x", addDot)
+
+		v, _ := m.Get("x")
+		c.Assert(v.Len(), qt.Equals, 2)
+	})
+
+	c.Run("Remove", func(c *qt.C) {
+		m := newSetMap("a")
+		m.Apply("x", addDot)
+		m.Apply("y", addDot)
+		m.Remove("x")
+
+		c.Assert(m.Has("x"), qt.IsFalse)
+		c.Assert(m.Has("y"), qt.IsTrue)
+	})
+
+	c.Run("RemoveAbsent", func(c *qt.C) {
+		m := newSetMap("a")
+		m.Remove("ghost") // should not panic
+		c.Assert(m.Len(), qt.Equals, 0)
+	})
+
+	c.Run("RemoveThenReApply", func(c *qt.C) {
+		m := newSetMap("a")
+		m.Apply("x", addDot)
+		m.Remove("x")
+		c.Assert(m.Has("x"), qt.IsFalse)
+
+		m.Apply("x", addDot)
+		c.Assert(m.Has("x"), qt.IsTrue)
+		c.Assert(m.Len(), qt.Equals, 1)
+	})
+
+	c.Run("Context", func(c *qt.C) {
+		a := newSetMap("a")
+		a.Apply("x", addDot)
+
+		ctx := a.Context()
+		c.Assert(ctx, qt.Not(qt.IsNil))
+		// The context should contain the dot generated by Apply.
+		c.Assert(len(ctx.ReplicaIDs()), qt.Equals, 1)
+		c.Assert(ctx.ReplicaIDs()[0], qt.Equals, dotcontext.ReplicaID("a"))
+	})
 }
 
-// --- Merge associativity ---
-
-func TestMergeAssociative(t *testing.T) {
+func TestDeltaReturn(t *testing.T) {
 	c := qt.New(t)
-	a := newSetMap("a")
-	b := newSetMap("b")
-	x := newSetMap("c")
 
-	a.Apply("x", addDot)
-	a.Apply("y", addDot)
-	b.Apply("y", addDot)
-	b.Apply("z", addDot)
-	x.Apply("x", addDot)
-	x.Remove("x")
-	x.Apply("w", addDot)
+	c.Run("Apply", func(c *qt.C) {
+		m := newSetMap("a")
+		delta := m.Apply("x", addDot)
 
-	// (a ⊔ b) ⊔ c
-	ab := newSetMap("ab")
-	ab.Merge(a)
-	ab.Merge(b)
-	abc := newSetMap("abc")
-	abc.Merge(ab)
-	abc.Merge(x)
-
-	// a ⊔ (b ⊔ c)
-	bc := newSetMap("bc")
-	bc.Merge(b)
-	bc.Merge(x)
-	abc2 := newSetMap("abc2")
-	abc2.Merge(a)
-	abc2.Merge(bc)
-
-	abcKeys := abc.Keys()
-	abc2Keys := abc2.Keys()
-	slices.Sort(abcKeys)
-	slices.Sort(abc2Keys)
-	c.Assert(abcKeys, qt.DeepEquals, abc2Keys)
+		c.Assert(delta.Has("x"), qt.IsTrue)
+		c.Assert(delta.Len(), qt.Equals, 1)
+	})
 }
 
-// --- Delta-delta merge ---
-
-func TestDeltaDeltaMerge(t *testing.T) {
+func TestAddWins(t *testing.T) {
 	c := qt.New(t)
-	a := newSetMap("a")
-	d1 := a.Apply("x", addDot)
-	d2 := a.Apply("y", addDot)
 
-	// Combine deltas, then apply.
-	d1.Merge(d2)
+	c.Run("ConcurrentAddRemove", func(c *qt.C) {
+		a := newSetMap("a")
+		b := newSetMap("b")
 
-	b := newSetMap("b")
-	b.Merge(d1)
+		addDelta := a.Apply("x", addDot)
+		b.Merge(addDelta)
 
-	keys := b.Keys()
-	slices.Sort(keys)
-	c.Assert(keys, qt.DeepEquals, []string{"x", "y"})
+		rmDelta := a.Remove("x")
+		addDelta2 := b.Apply("x", addDot)
+
+		a.Merge(addDelta2)
+		b.Merge(rmDelta)
+
+		c.Assert(a.Has("x"), qt.IsTrue)
+		c.Assert(b.Has("x"), qt.IsTrue)
+	})
+
+	c.Run("ConcurrentApplyDifferentKeys", func(c *qt.C) {
+		a := newSetMap("a")
+		b := newSetMap("b")
+
+		da := a.Apply("x", addDot)
+		db := b.Apply("y", addDot)
+
+		a.Merge(db)
+		b.Merge(da)
+
+		for _, m := range []*ORMap[string, *dotcontext.DotSet]{a, b} {
+			keys := m.Keys()
+			slices.Sort(keys)
+			c.Assert(keys, qt.DeepEquals, []string{"x", "y"})
+		}
+	})
+
+	c.Run("ConcurrentApplySameKey", func(c *qt.C) {
+		a := newSetMap("a")
+		b := newSetMap("b")
+
+		da := a.Apply("x", addDot)
+		db := b.Apply("x", addDot)
+
+		a.Merge(db)
+		b.Merge(da)
+
+		for _, m := range []*ORMap[string, *dotcontext.DotSet]{a, b} {
+			v, ok := m.Get("x")
+			c.Assert(ok, qt.IsTrue)
+			c.Assert(v.Len(), qt.Equals, 2)
+		}
+	})
+
+	c.Run("ConcurrentApplySameKeyMergesValues", func(c *qt.C) {
+		a := newSetMap("a")
+		b := newSetMap("b")
+
+		// Both apply to the same key concurrently — values should merge (union of dot sets).
+		da := a.Apply("x", addDot)
+		a.Apply("x", addDot) // a has 2 dots for "x"
+		db := b.Apply("x", addDot)
+
+		a.Merge(db)
+		b.Merge(da)
+
+		// After merge, both should have "x" with merged dots.
+		c.Assert(a.Has("x"), qt.IsTrue)
+		c.Assert(b.Has("x"), qt.IsTrue)
+
+		vA, _ := a.Get("x")
+		vB, _ := b.Get("x")
+		c.Assert(vA.Len(), qt.Equals, 3) // 2 from a + 1 from b
+		c.Assert(vB.Len(), qt.Equals, 2) // 1 from a's first delta + 1 from b
+	})
+
+	c.Run("ConcurrentRemovesSameKey", func(c *qt.C) {
+		a := newSetMap("a")
+		b := newSetMap("b")
+
+		addDelta := a.Apply("x", addDot)
+		b.Merge(addDelta)
+
+		rmA := a.Remove("x")
+		rmB := b.Remove("x")
+
+		a.Merge(rmB)
+		b.Merge(rmA)
+
+		c.Assert(a.Has("x"), qt.IsFalse)
+		c.Assert(b.Has("x"), qt.IsFalse)
+	})
 }
 
-// --- Concurrent removes ---
-
-func TestConcurrentRemovesSameKey(t *testing.T) {
+func TestMergeProperties(t *testing.T) {
 	c := qt.New(t)
-	a := newSetMap("a")
-	b := newSetMap("b")
 
-	addDelta := a.Apply("x", addDot)
-	b.Merge(addDelta)
+	c.Run("Idempotent", func(c *qt.C) {
+		a := newSetMap("a")
+		a.Apply("x", addDot)
 
-	rmA := a.Remove("x")
-	rmB := b.Remove("x")
+		snapshot := newSetMap("x")
+		snapshot.Merge(a)
 
-	a.Merge(rmB)
-	b.Merge(rmA)
+		a.Merge(snapshot)
+		a.Merge(snapshot)
 
-	c.Assert(a.Has("x"), qt.IsFalse)
-	c.Assert(b.Has("x"), qt.IsFalse)
+		c.Assert(a.Len(), qt.Equals, 1)
+	})
+
+	c.Run("Commutative", func(c *qt.C) {
+		a := newSetMap("a")
+		b := newSetMap("b")
+		a.Apply("x", addDot)
+		b.Apply("y", addDot)
+
+		ab := newSetMap("x")
+		ab.Merge(a)
+		ab.Merge(b)
+
+		ba := newSetMap("x")
+		ba.Merge(b)
+		ba.Merge(a)
+
+		abKeys := ab.Keys()
+		baKeys := ba.Keys()
+		slices.Sort(abKeys)
+		slices.Sort(baKeys)
+		c.Assert(abKeys, qt.DeepEquals, baKeys)
+	})
+
+	c.Run("Associative", func(c *qt.C) {
+		a := newSetMap("a")
+		b := newSetMap("b")
+		x := newSetMap("c")
+
+		a.Apply("x", addDot)
+		a.Apply("y", addDot)
+		b.Apply("y", addDot)
+		b.Apply("z", addDot)
+		x.Apply("x", addDot)
+		x.Remove("x")
+		x.Apply("w", addDot)
+
+		// (a ⊔ b) ⊔ c
+		ab := newSetMap("ab")
+		ab.Merge(a)
+		ab.Merge(b)
+		abc := newSetMap("abc")
+		abc.Merge(ab)
+		abc.Merge(x)
+
+		// a ⊔ (b ⊔ c)
+		bc := newSetMap("bc")
+		bc.Merge(b)
+		bc.Merge(x)
+		abc2 := newSetMap("abc2")
+		abc2.Merge(a)
+		abc2.Merge(bc)
+
+		abcKeys := abc.Keys()
+		abc2Keys := abc2.Keys()
+		slices.Sort(abcKeys)
+		slices.Sort(abc2Keys)
+		c.Assert(abcKeys, qt.DeepEquals, abc2Keys)
+	})
 }
 
-// --- Remove then re-apply ---
-
-func TestRemoveThenReApply(t *testing.T) {
+func TestDeltaPropagation(t *testing.T) {
 	c := qt.New(t)
-	m := newSetMap("a")
-	m.Apply("x", addDot)
-	m.Remove("x")
-	c.Assert(m.Has("x"), qt.IsFalse)
 
-	m.Apply("x", addDot)
-	c.Assert(m.Has("x"), qt.IsTrue)
-	c.Assert(m.Len(), qt.Equals, 1)
+	c.Run("MergeDelta", func(c *qt.C) {
+		a := newSetMap("a")
+		b := newSetMap("b")
+
+		delta := a.Apply("x", addDot)
+		b.Merge(delta)
+
+		c.Assert(b.Has("x"), qt.IsTrue)
+	})
+
+	c.Run("MergeRemoveDelta", func(c *qt.C) {
+		a := newSetMap("a")
+		b := newSetMap("b")
+
+		addDelta := a.Apply("x", addDot)
+		b.Merge(addDelta)
+
+		rmDelta := a.Remove("x")
+		b.Merge(rmDelta)
+
+		c.Assert(b.Has("x"), qt.IsFalse)
+	})
+
+	c.Run("IncrementalEqualsFullMerge", func(c *qt.C) {
+		a := newSetMap("a")
+		d1 := a.Apply("x", addDot)
+		d2 := a.Apply("y", addDot)
+
+		inc := newSetMap("b")
+		inc.Merge(d1)
+		inc.Merge(d2)
+
+		full := newSetMap("b")
+		full.Merge(a)
+
+		incKeys := inc.Keys()
+		fullKeys := full.Keys()
+		slices.Sort(incKeys)
+		slices.Sort(fullKeys)
+		c.Assert(incKeys, qt.DeepEquals, fullKeys)
+	})
+
+	c.Run("DeltaDeltaMerge", func(c *qt.C) {
+		a := newSetMap("a")
+		d1 := a.Apply("x", addDot)
+		d2 := a.Apply("y", addDot)
+
+		// Combine deltas, then apply.
+		d1.Merge(d2)
+
+		b := newSetMap("b")
+		b.Merge(d1)
+
+		keys := b.Keys()
+		slices.Sort(keys)
+		c.Assert(keys, qt.DeepEquals, []string{"x", "y"})
+	})
+
+	c.Run("ApplySupersede", func(c *qt.C) {
+		a := newSetMap("a")
+		b := newSetMap("b")
+
+		d1 := a.Apply("x", addDot)
+		b.Merge(d1)
+
+		d2 := a.Apply("x", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotSet, delta *dotcontext.DotSet) {
+			var old []dotcontext.Dot
+			v.Range(func(d dotcontext.Dot) bool {
+				old = append(old, d)
+				return true
+			})
+			for _, d := range old {
+				v.Remove(d)
+			}
+			d := ctx.Next(id)
+			v.Add(d)
+			delta.Add(d)
+		})
+		b.Merge(d2)
+
+		v, ok := b.Get("x")
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(v.Len(), qt.Equals, 1)
+	})
 }
 
-// --- Nested value merge after concurrent apply ---
-
-func TestConcurrentApplySameKeyMergesValues(t *testing.T) {
+func TestMergeWithEmpty(t *testing.T) {
 	c := qt.New(t)
-	a := newSetMap("a")
-	b := newSetMap("b")
 
-	// Both apply to the same key concurrently — values should merge (union of dot sets).
-	da := a.Apply("x", addDot)
-	a.Apply("x", addDot) // a has 2 dots for "x"
-	db := b.Apply("x", addDot)
+	c.Run("IntoEmpty", func(c *qt.C) {
+		a := newSetMap("a")
+		a.Apply("x", addDot)
+		a.Apply("y", addDot)
 
-	a.Merge(db)
-	b.Merge(da)
+		b := newSetMap("b")
+		b.Merge(a)
 
-	// After merge, both should have "x" with merged dots.
-	c.Assert(a.Has("x"), qt.IsTrue)
-	c.Assert(b.Has("x"), qt.IsTrue)
+		keys := b.Keys()
+		slices.Sort(keys)
+		c.Assert(keys, qt.DeepEquals, []string{"x", "y"})
+	})
 
-	vA, _ := a.Get("x")
-	vB, _ := b.Get("x")
-	c.Assert(vA.Len(), qt.Equals, 3) // 2 from a + 1 from b
-	c.Assert(vB.Len(), qt.Equals, 2) // 1 from a's first delta + 1 from b
+	c.Run("EmptyIntoPopulated", func(c *qt.C) {
+		a := newSetMap("a")
+		a.Apply("x", addDot)
+
+		empty := newSetMap("b")
+		a.Merge(empty)
+
+		c.Assert(a.Has("x"), qt.IsTrue)
+		c.Assert(a.Len(), qt.Equals, 1)
+	})
 }
 
-// --- Merge with empty map ---
-
-func TestMergeIntoEmpty(t *testing.T) {
+func TestStateRoundTrip(t *testing.T) {
 	c := qt.New(t)
-	a := newSetMap("a")
-	a.Apply("x", addDot)
-	a.Apply("y", addDot)
 
-	b := newSetMap("b")
-	b.Merge(a)
+	c.Run("StateFromCausal", func(c *qt.C) {
+		a := newSetMap("a")
+		a.Apply("x", addDot)
+		a.Apply("y", addDot)
 
-	keys := b.Keys()
-	slices.Sort(keys)
-	c.Assert(keys, qt.DeepEquals, []string{"x", "y"})
+		state := a.State()
+		b := FromCausal(state, joinDotSet, dotcontext.NewDotSet)
+
+		c.Assert(b.Has("x"), qt.IsTrue)
+		c.Assert(b.Has("y"), qt.IsTrue)
+		c.Assert(b.Len(), qt.Equals, 2)
+	})
+
+	c.Run("FromCausalDeltaMerge", func(c *qt.C) {
+		a := newSetMap("a")
+		delta := a.Apply("x", addDot)
+
+		reconstructed := FromCausal(delta.State(), joinDotSet, dotcontext.NewDotSet)
+
+		b := newSetMap("b")
+		b.Merge(reconstructed)
+
+		c.Assert(b.Has("x"), qt.IsTrue)
+		c.Assert(b.Len(), qt.Equals, 1)
+	})
 }
 
-func TestMergeEmptyIntoPopulated(t *testing.T) {
+func TestConvergence(t *testing.T) {
 	c := qt.New(t)
-	a := newSetMap("a")
-	a.Apply("x", addDot)
 
-	empty := newSetMap("b")
-	a.Merge(empty)
+	c.Run("ThreeReplica", func(c *qt.C) {
+		a := newSetMap("a")
+		b := newSetMap("b")
+		x := newSetMap("c")
 
-	c.Assert(a.Has("x"), qt.IsTrue)
-	c.Assert(a.Len(), qt.Equals, 1)
-}
+		da := a.Apply("x", addDot)
+		db := b.Apply("y", addDot)
+		dx := x.Apply("z", addDot)
 
-// --- Context accessor ---
+		a.Merge(db)
+		a.Merge(dx)
+		b.Merge(da)
+		b.Merge(dx)
+		x.Merge(da)
+		x.Merge(db)
 
-func TestContext(t *testing.T) {
-	c := qt.New(t)
-	a := newSetMap("a")
-	a.Apply("x", addDot)
+		want := []string{"x", "y", "z"}
+		for _, m := range []*ORMap[string, *dotcontext.DotSet]{a, b, x} {
+			keys := m.Keys()
+			slices.Sort(keys)
+			c.Assert(keys, qt.DeepEquals, want)
+		}
+	})
 
-	ctx := a.Context()
-	c.Assert(ctx, qt.Not(qt.IsNil))
-	// The context should contain the dot generated by Apply.
-	c.Assert(len(ctx.ReplicaIDs()), qt.Equals, 1)
-	c.Assert(ctx.ReplicaIDs()[0], qt.Equals, dotcontext.ReplicaID("a"))
-}
+	c.Run("FiveReplica", func(c *qt.C) {
+		ids := []dotcontext.ReplicaID{"a", "b", "c", "d", "e"}
+		replicas := make([]*ORMap[string, *dotcontext.DotSet], len(ids))
+		for i, id := range ids {
+			replicas[i] = newSetMap(id)
+		}
 
-// --- State / FromCausal round-trip ---
+		// Mixed operations: adds, a remove, concurrent adds of same key.
+		deltas := make([]*ORMap[string, *dotcontext.DotSet], len(ids))
+		deltas[0] = replicas[0].Apply("x", addDot) // a adds "x"
+		deltas[1] = replicas[1].Apply("y", addDot) // b adds "y"
+		deltas[2] = replicas[2].Apply("z", addDot) // c adds "z"
+		replicas[3].Apply("w", addDot)              // d adds "w" then removes
+		deltas[3] = replicas[3].Remove("w")         // d removes "w"
+		deltas[4] = replicas[4].Apply("x", addDot)  // e also adds "x" concurrently
 
-func TestStateFromCausalRoundTrip(t *testing.T) {
-	c := qt.New(t)
-	a := newSetMap("a")
-	a.Apply("x", addDot)
-	a.Apply("y", addDot)
+		// Full mesh merge.
+		for i := range replicas {
+			for j := range replicas {
+				if i != j {
+					replicas[i].Merge(deltas[j])
+				}
+			}
+		}
 
-	state := a.State()
-	b := FromCausal(state, joinDotSet, dotcontext.NewDotSet)
-
-	c.Assert(b.Has("x"), qt.IsTrue)
-	c.Assert(b.Has("y"), qt.IsTrue)
-	c.Assert(b.Len(), qt.Equals, 2)
-}
-
-func TestFromCausalDeltaMerge(t *testing.T) {
-	c := qt.New(t)
-	a := newSetMap("a")
-	delta := a.Apply("x", addDot)
-
-	reconstructed := FromCausal(delta.State(), joinDotSet, dotcontext.NewDotSet)
-
-	b := newSetMap("b")
-	b.Merge(reconstructed)
-
-	c.Assert(b.Has("x"), qt.IsTrue)
-	c.Assert(b.Len(), qt.Equals, 1)
+		// All converge: {"x", "y", "z"} — "w" was added then removed by d.
+		want := []string{"x", "y", "z"}
+		for i, m := range replicas {
+			keys := m.Keys()
+			slices.Sort(keys)
+			c.Assert(keys, qt.DeepEquals, want, qt.Commentf("replica %s", ids[i]))
+		}
+	})
 }
 
 // --- Nested ORMap (ORMap[string, *DotMap[string, *DotSet]]) ---
@@ -469,114 +512,86 @@ func newNestedMap(id dotcontext.ReplicaID) *ORMap[string, *dotcontext.DotMap[str
 	)
 }
 
-func TestNestedORMapConcurrentApply(t *testing.T) {
+func TestNestedORMap(t *testing.T) {
 	c := qt.New(t)
-	a := newNestedMap("a")
-	b := newNestedMap("b")
 
-	// a adds sub-key "file1" under key "dir".
-	da := a.Apply("dir", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotMap[string, *dotcontext.DotSet], delta *dotcontext.DotMap[string, *dotcontext.DotSet]) {
-		d := ctx.Next(id)
-		ds, ok := v.Get("file1")
-		if !ok {
-			ds = dotcontext.NewDotSet()
-			v.Set("file1", ds)
-		}
-		ds.Add(d)
-		deltaDS := dotcontext.NewDotSet()
-		deltaDS.Add(d)
-		delta.Set("file1", deltaDS)
-	})
+	c.Run("ConcurrentApply", func(c *qt.C) {
+		a := newNestedMap("a")
+		b := newNestedMap("b")
 
-	// b concurrently adds sub-key "file2" under the same key "dir".
-	db := b.Apply("dir", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotMap[string, *dotcontext.DotSet], delta *dotcontext.DotMap[string, *dotcontext.DotSet]) {
-		d := ctx.Next(id)
-		ds, ok := v.Get("file2")
-		if !ok {
-			ds = dotcontext.NewDotSet()
-			v.Set("file2", ds)
-		}
-		ds.Add(d)
-		deltaDS := dotcontext.NewDotSet()
-		deltaDS.Add(d)
-		delta.Set("file2", deltaDS)
-	})
-
-	a.Merge(db)
-	b.Merge(da)
-
-	// Both should have "dir" with sub-keys "file1" and "file2".
-	for _, m := range []*ORMap[string, *dotcontext.DotMap[string, *dotcontext.DotSet]]{a, b} {
-		v, ok := m.Get("dir")
-		c.Assert(ok, qt.IsTrue)
-		_, hasFile1 := v.Get("file1")
-		_, hasFile2 := v.Get("file2")
-		c.Assert(hasFile1, qt.IsTrue)
-		c.Assert(hasFile2, qt.IsTrue)
-	}
-}
-
-func TestNestedORMapRemoveKeyPreservesOthers(t *testing.T) {
-	c := qt.New(t)
-	a := newNestedMap("a")
-	b := newNestedMap("b")
-
-	applyFile := func(key, subKey string) func(dotcontext.ReplicaID, *dotcontext.CausalContext, *dotcontext.DotMap[string, *dotcontext.DotSet], *dotcontext.DotMap[string, *dotcontext.DotSet]) {
-		return func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotMap[string, *dotcontext.DotSet], delta *dotcontext.DotMap[string, *dotcontext.DotSet]) {
+		// a adds sub-key "file1" under key "dir".
+		da := a.Apply("dir", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotMap[string, *dotcontext.DotSet], delta *dotcontext.DotMap[string, *dotcontext.DotSet]) {
 			d := ctx.Next(id)
-			ds, ok := v.Get(subKey)
+			ds, ok := v.Get("file1")
 			if !ok {
 				ds = dotcontext.NewDotSet()
-				v.Set(subKey, ds)
+				v.Set("file1", ds)
 			}
 			ds.Add(d)
 			deltaDS := dotcontext.NewDotSet()
 			deltaDS.Add(d)
-			delta.Set(subKey, deltaDS)
-		}
-	}
-
-	d1 := a.Apply("dir1", applyFile("dir1", "f"))
-	d2 := a.Apply("dir2", applyFile("dir2", "f"))
-	b.Merge(d1)
-	b.Merge(d2)
-
-	// Remove dir1 — dir2 should survive.
-	rmDelta := a.Remove("dir1")
-	b.Merge(rmDelta)
-
-	c.Assert(b.Has("dir1"), qt.IsFalse)
-	c.Assert(b.Has("dir2"), qt.IsTrue)
-}
-
-// --- Apply with supersede (replace pattern) ---
-
-func TestApplySupersede(t *testing.T) {
-	c := qt.New(t)
-	a := newSetMap("a")
-	b := newSetMap("b")
-
-	d1 := a.Apply("x", addDot)
-	b.Merge(d1)
-
-	d2 := a.Apply("x", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotSet, delta *dotcontext.DotSet) {
-		var old []dotcontext.Dot
-		v.Range(func(d dotcontext.Dot) bool {
-			old = append(old, d)
-			return true
+			delta.Set("file1", deltaDS)
 		})
-		for _, d := range old {
-			v.Remove(d)
-		}
-		d := ctx.Next(id)
-		v.Add(d)
-		delta.Add(d)
-	})
-	b.Merge(d2)
 
-	v, ok := b.Get("x")
-	c.Assert(ok, qt.IsTrue)
-	c.Assert(v.Len(), qt.Equals, 1)
+		// b concurrently adds sub-key "file2" under the same key "dir".
+		db := b.Apply("dir", func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotMap[string, *dotcontext.DotSet], delta *dotcontext.DotMap[string, *dotcontext.DotSet]) {
+			d := ctx.Next(id)
+			ds, ok := v.Get("file2")
+			if !ok {
+				ds = dotcontext.NewDotSet()
+				v.Set("file2", ds)
+			}
+			ds.Add(d)
+			deltaDS := dotcontext.NewDotSet()
+			deltaDS.Add(d)
+			delta.Set("file2", deltaDS)
+		})
+
+		a.Merge(db)
+		b.Merge(da)
+
+		// Both should have "dir" with sub-keys "file1" and "file2".
+		for _, m := range []*ORMap[string, *dotcontext.DotMap[string, *dotcontext.DotSet]]{a, b} {
+			v, ok := m.Get("dir")
+			c.Assert(ok, qt.IsTrue)
+			_, hasFile1 := v.Get("file1")
+			_, hasFile2 := v.Get("file2")
+			c.Assert(hasFile1, qt.IsTrue)
+			c.Assert(hasFile2, qt.IsTrue)
+		}
+	})
+
+	c.Run("RemoveKeyPreservesOthers", func(c *qt.C) {
+		a := newNestedMap("a")
+		b := newNestedMap("b")
+
+		applyFile := func(key, subKey string) func(dotcontext.ReplicaID, *dotcontext.CausalContext, *dotcontext.DotMap[string, *dotcontext.DotSet], *dotcontext.DotMap[string, *dotcontext.DotSet]) {
+			return func(id dotcontext.ReplicaID, ctx *dotcontext.CausalContext, v *dotcontext.DotMap[string, *dotcontext.DotSet], delta *dotcontext.DotMap[string, *dotcontext.DotSet]) {
+				d := ctx.Next(id)
+				ds, ok := v.Get(subKey)
+				if !ok {
+					ds = dotcontext.NewDotSet()
+					v.Set(subKey, ds)
+				}
+				ds.Add(d)
+				deltaDS := dotcontext.NewDotSet()
+				deltaDS.Add(d)
+				delta.Set(subKey, deltaDS)
+			}
+		}
+
+		d1 := a.Apply("dir1", applyFile("dir1", "f"))
+		d2 := a.Apply("dir2", applyFile("dir2", "f"))
+		b.Merge(d1)
+		b.Merge(d2)
+
+		// Remove dir1 — dir2 should survive.
+		rmDelta := a.Remove("dir1")
+		b.Merge(rmDelta)
+
+		c.Assert(b.Has("dir1"), qt.IsFalse)
+		c.Assert(b.Has("dir2"), qt.IsTrue)
+	})
 }
 
 // --- DotFun values (map of counters) ---

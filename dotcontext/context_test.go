@@ -30,16 +30,34 @@ func TestCausalContextNext(t *testing.T) {
 
 func TestCausalContextAdd(t *testing.T) {
 	c := qt.New(t)
-	cc := New()
 
-	// Contiguous: goes directly into version vector.
-	cc.Add(Dot{ID: "a", Seq: 1})
-	c.Assert(cc.Has(Dot{ID: "a", Seq: 1}), qt.IsTrue)
+	c.Run("Contiguous and gap", func(c *qt.C) {
+		cc := New()
 
-	// Gap: becomes an outlier.
-	cc.Add(Dot{ID: "a", Seq: 3})
-	c.Assert(cc.Has(Dot{ID: "a", Seq: 3}), qt.IsTrue)
-	c.Assert(cc.Has(Dot{ID: "a", Seq: 2}), qt.IsFalse)
+		// Contiguous: goes directly into version vector.
+		cc.Add(Dot{ID: "a", Seq: 1})
+		c.Assert(cc.Has(Dot{ID: "a", Seq: 1}), qt.IsTrue)
+
+		// Gap: becomes an outlier.
+		cc.Add(Dot{ID: "a", Seq: 3})
+		c.Assert(cc.Has(Dot{ID: "a", Seq: 3}), qt.IsTrue)
+		c.Assert(cc.Has(Dot{ID: "a", Seq: 2}), qt.IsFalse)
+	})
+
+	c.Run("Duplicate in VV", func(c *qt.C) {
+		cc := New()
+		cc.Add(Dot{ID: "a", Seq: 1})
+		cc.Add(Dot{ID: "a", Seq: 1}) // duplicate — already in VV
+		c.Assert(cc.Has(Dot{ID: "a", Seq: 1}), qt.IsTrue)
+		c.Assert(cc.Max("a"), qt.Equals, uint64(1))
+	})
+
+	c.Run("Duplicate outlier", func(c *qt.C) {
+		cc := New()
+		cc.Add(Dot{ID: "a", Seq: 3}) // outlier
+		cc.Add(Dot{ID: "a", Seq: 3}) // duplicate outlier
+		c.Assert(cc.Has(Dot{ID: "a", Seq: 3}), qt.IsTrue)
+	})
 }
 
 func TestCausalContextMax(t *testing.T) {
@@ -52,72 +70,80 @@ func TestCausalContextMax(t *testing.T) {
 	c.Assert(cc.Max("b"), qt.Equals, uint64(0))
 }
 
-func TestCausalContextMerge(t *testing.T) {
-	c := qt.New(t)
-	a := New()
-	a.Add(Dot{ID: "x", Seq: 1})
-	a.Add(Dot{ID: "x", Seq: 2})
-
-	b := New()
-	b.Add(Dot{ID: "x", Seq: 1})
-	b.Add(Dot{ID: "x", Seq: 2})
-	b.Add(Dot{ID: "x", Seq: 3})
-	b.Add(Dot{ID: "y", Seq: 1})
-
-	a.Merge(b)
-
-	for _, d := range []Dot{
-		{ID: "x", Seq: 1},
-		{ID: "x", Seq: 2},
-		{ID: "x", Seq: 3},
-		{ID: "y", Seq: 1},
-	} {
-		c.Assert(a.Has(d), qt.IsTrue, qt.Commentf("dot %v", d))
-	}
-}
-
 func TestCausalContextCompact(t *testing.T) {
 	c := qt.New(t)
-	cc := New()
-	cc.Add(Dot{ID: "a", Seq: 1})
-	cc.Add(Dot{ID: "a", Seq: 3}) // outlier
-	cc.Add(Dot{ID: "a", Seq: 5}) // outlier
-	cc.Add(Dot{ID: "a", Seq: 2}) // fills gap → 3 should compact
 
-	cc.Compact()
+	c.Run("Partial", func(c *qt.C) {
+		cc := New()
+		cc.Add(Dot{ID: "a", Seq: 1})
+		cc.Add(Dot{ID: "a", Seq: 3}) // outlier
+		cc.Add(Dot{ID: "a", Seq: 5}) // outlier
+		cc.Add(Dot{ID: "a", Seq: 2}) // fills gap → 3 should compact
 
-	c.Assert(cc.Has(Dot{ID: "a", Seq: 3}), qt.IsTrue)
-	c.Assert(cc.Has(Dot{ID: "a", Seq: 4}), qt.IsFalse)
-	c.Assert(cc.Has(Dot{ID: "a", Seq: 5}), qt.IsTrue)
-}
+		cc.Compact()
 
-func TestCausalContextCompactFull(t *testing.T) {
-	c := qt.New(t)
-	cc := New()
-	cc.Add(Dot{ID: "a", Seq: 1})
-	cc.Add(Dot{ID: "a", Seq: 3})
-	cc.Add(Dot{ID: "a", Seq: 5})
-	cc.Add(Dot{ID: "a", Seq: 2})
-	cc.Add(Dot{ID: "a", Seq: 4})
+		c.Assert(cc.Has(Dot{ID: "a", Seq: 3}), qt.IsTrue)
+		c.Assert(cc.Has(Dot{ID: "a", Seq: 4}), qt.IsFalse)
+		c.Assert(cc.Has(Dot{ID: "a", Seq: 5}), qt.IsTrue)
+	})
 
-	cc.Compact()
+	c.Run("Full", func(c *qt.C) {
+		cc := New()
+		cc.Add(Dot{ID: "a", Seq: 1})
+		cc.Add(Dot{ID: "a", Seq: 3})
+		cc.Add(Dot{ID: "a", Seq: 5})
+		cc.Add(Dot{ID: "a", Seq: 2})
+		cc.Add(Dot{ID: "a", Seq: 4})
 
-	for i := uint64(1); i <= 5; i++ {
-		c.Assert(cc.Has(Dot{ID: "a", Seq: i}), qt.IsTrue, qt.Commentf("a:%d", i))
-	}
-}
+		cc.Compact()
 
-func TestCausalContextCompactThenNext(t *testing.T) {
-	c := qt.New(t)
-	cc := New()
-	cc.Add(Dot{ID: "a", Seq: 1})
-	cc.Add(Dot{ID: "a", Seq: 3}) // outlier
-	cc.Add(Dot{ID: "a", Seq: 2}) // fills gap
+		for i := uint64(1); i <= 5; i++ {
+			c.Assert(cc.Has(Dot{ID: "a", Seq: i}), qt.IsTrue, qt.Commentf("a:%d", i))
+		}
+	})
 
-	cc.Compact()
+	c.Run("ThenNext", func(c *qt.C) {
+		cc := New()
+		cc.Add(Dot{ID: "a", Seq: 1})
+		cc.Add(Dot{ID: "a", Seq: 3}) // outlier
+		cc.Add(Dot{ID: "a", Seq: 2}) // fills gap
 
-	d := cc.Next("a")
-	c.Assert(d.Seq, qt.Equals, uint64(4))
+		cc.Compact()
+
+		d := cc.Next("a")
+		c.Assert(d.Seq, qt.Equals, uint64(4))
+	})
+
+	c.Run("Empty", func(c *qt.C) {
+		cc := New()
+		cc.Compact() // should not panic
+		c.Assert(cc.Max("a"), qt.Equals, uint64(0))
+	})
+
+	c.Run("NoOutliers", func(c *qt.C) {
+		cc := New()
+		cc.Next("a")
+		cc.Next("a")
+		cc.Compact() // nothing to promote
+		c.Assert(cc.Max("a"), qt.Equals, uint64(2))
+	})
+
+	c.Run("Idempotent", func(c *qt.C) {
+		cc := New()
+		cc.Next("a")
+		cc.Next("a")
+		cc.Add(Dot{ID: "a", Seq: 5}) // outlier
+		cc.Add(Dot{ID: "b", Seq: 3}) // outlier
+
+		cc.Compact()
+		snapshot := cc.Clone()
+
+		cc.Compact() // second call should be a no-op
+		c.Assert(cc.Max("a"), qt.Equals, snapshot.Max("a"))
+		c.Assert(cc.Max("b"), qt.Equals, snapshot.Max("b"))
+		c.Assert(cc.Has(Dot{ID: "a", Seq: 5}), qt.Equals, snapshot.Has(Dot{ID: "a", Seq: 5}))
+		c.Assert(cc.Has(Dot{ID: "b", Seq: 3}), qt.Equals, snapshot.Has(Dot{ID: "b", Seq: 3}))
+	})
 }
 
 func TestCausalContextClone(t *testing.T) {
@@ -153,286 +179,305 @@ func missingEqual(got, want map[ReplicaID][]SeqRange) bool {
 	return true
 }
 
-func TestCausalContextMissingBothEmpty(t *testing.T) {
+func TestCausalContextMissing(t *testing.T) {
 	c := qt.New(t)
-	local := New()
-	remote := New()
-	got := local.Missing(remote)
-	c.Assert(len(got), qt.Equals, 0)
-}
 
-func TestCausalContextMissingLocalEmpty(t *testing.T) {
-	c := qt.New(t)
-	local := New()
-	remote := New()
-	remote.Next("a")
-	remote.Next("a")
-	remote.Next("b")
+	tcs := []struct {
+		name    string
+		setupFn func() (local, remote *CausalContext)
+		want    map[ReplicaID][]SeqRange
+	}{
+		{
+			name: "BothEmpty",
+			setupFn: func() (local, remote *CausalContext) {
+				local = New()
+				remote = New()
+				return
+			},
+			want: nil,
+		},
+		{
+			name: "LocalEmpty",
+			setupFn: func() (local, remote *CausalContext) {
+				local = New()
+				remote = New()
+				remote.Next("a")
+				remote.Next("a")
+				remote.Next("b")
+				return
+			},
+			want: map[ReplicaID][]SeqRange{
+				"a": {{Lo: 1, Hi: 2}},
+				"b": {{Lo: 1, Hi: 1}},
+			},
+		},
+		{
+			name: "AlreadySynced",
+			setupFn: func() (local, remote *CausalContext) {
+				local = New()
+				local.Next("a")
+				local.Next("a")
+				remote = local.Clone()
+				return
+			},
+			want: nil,
+		},
+		{
+			name: "PartiallyBehind",
+			setupFn: func() (local, remote *CausalContext) {
+				local = New()
+				local.Next("a") // a:1
+				local.Next("a") // a:2
+				local.Next("b") // b:1
 
-	got := local.Missing(remote)
-	want := map[ReplicaID][]SeqRange{
-		"a": {{Lo: 1, Hi: 2}},
-		"b": {{Lo: 1, Hi: 1}},
+				remote = New()
+				remote.Next("a") // a:1
+				remote.Next("a") // a:2
+				remote.Next("a") // a:3
+				remote.Next("a") // a:4
+				remote.Next("b") // b:1
+				return
+			},
+			want: map[ReplicaID][]SeqRange{
+				"a": {{Lo: 3, Hi: 4}},
+			},
+		},
+		{
+			name: "HolePunch",
+			setupFn: func() (local, remote *CausalContext) {
+				local = New()
+				local.Add(Dot{ID: "a", Seq: 1})
+				local.Add(Dot{ID: "a", Seq: 2})
+				local.Add(Dot{ID: "a", Seq: 3})
+				local.Add(Dot{ID: "a", Seq: 5}) // outlier — gap at 4
+
+				remote = New()
+				for i := 0; i < 7; i++ {
+					remote.Next("a")
+				}
+				return
+			},
+			want: map[ReplicaID][]SeqRange{
+				"a": {{Lo: 4, Hi: 4}, {Lo: 6, Hi: 7}},
+			},
+		},
+		{
+			name: "HolePunchMultiple",
+			setupFn: func() (local, remote *CausalContext) {
+				local = New()
+				local.Add(Dot{ID: "a", Seq: 1})
+				local.Add(Dot{ID: "a", Seq: 2})
+				local.Add(Dot{ID: "a", Seq: 4}) // outlier
+				local.Add(Dot{ID: "a", Seq: 6}) // outlier
+
+				remote = New()
+				for i := 0; i < 8; i++ {
+					remote.Next("a")
+				}
+				return
+			},
+			want: map[ReplicaID][]SeqRange{
+				"a": {{Lo: 3, Hi: 3}, {Lo: 5, Hi: 5}, {Lo: 7, Hi: 8}},
+			},
+		},
+		{
+			name: "RemoteOutliers",
+			setupFn: func() (local, remote *CausalContext) {
+				local = New()
+				for i := 0; i < 3; i++ {
+					local.Next("a")
+				}
+
+				remote = local.Clone()
+				remote.Add(Dot{ID: "a", Seq: 5}) // outlier
+				remote.Add(Dot{ID: "a", Seq: 7}) // outlier
+				return
+			},
+			want: map[ReplicaID][]SeqRange{
+				"a": {{Lo: 5, Hi: 5}, {Lo: 7, Hi: 7}},
+			},
+		},
+		{
+			name: "RemoteOutlierAlreadyObserved",
+			setupFn: func() (local, remote *CausalContext) {
+				local = New()
+				for i := 0; i < 5; i++ {
+					local.Next("a")
+				}
+
+				remote = New()
+				for i := 0; i < 3; i++ {
+					remote.Next("a")
+				}
+				remote.Add(Dot{ID: "a", Seq: 4}) // outlier, but local has it via VV
+				return
+			},
+			want: nil,
+		},
+		{
+			name: "Mixed",
+			setupFn: func() (local, remote *CausalContext) {
+				local = New()
+				local.Add(Dot{ID: "a", Seq: 1})
+				local.Add(Dot{ID: "a", Seq: 2})
+				local.Add(Dot{ID: "a", Seq: 3})
+				local.Add(Dot{ID: "a", Seq: 6}) // outlier (gap at 4,5)
+				local.Add(Dot{ID: "b", Seq: 1})
+				local.Add(Dot{ID: "b", Seq: 2})
+
+				remote = New()
+				for i := 0; i < 5; i++ {
+					remote.Next("a")
+				}
+				for i := 0; i < 4; i++ {
+					remote.Next("b")
+				}
+				remote.Next("c")
+				remote.Add(Dot{ID: "a", Seq: 8}) // outlier
+				return
+			},
+			want: map[ReplicaID][]SeqRange{
+				"a": {{Lo: 4, Hi: 5}, {Lo: 8, Hi: 8}},
+				"b": {{Lo: 3, Hi: 4}},
+				"c": {{Lo: 1, Hi: 1}},
+			},
+		},
+		{
+			name: "PureOutliers",
+			setupFn: func() (local, remote *CausalContext) {
+				// Local has only outliers for "a" — no VV entry (VV["a"] == 0).
+				local = New()
+				local.Add(Dot{ID: "a", Seq: 3}) // outlier
+				local.Add(Dot{ID: "a", Seq: 5}) // outlier
+
+				// Remote also has only outliers for "a", some overlapping.
+				remote = New()
+				remote.Add(Dot{ID: "a", Seq: 2}) // outlier, local doesn't have
+				remote.Add(Dot{ID: "a", Seq: 5}) // outlier, local has this one
+				remote.Add(Dot{ID: "a", Seq: 7}) // outlier, local doesn't have
+				return
+			},
+			// Local is missing a:2 and a:7 from remote. a:5 is already observed.
+			want: map[ReplicaID][]SeqRange{
+				"a": {{Lo: 2, Hi: 2}, {Lo: 7, Hi: 7}},
+			},
+		},
+		{
+			name: "PureOutliersNewReplica",
+			setupFn: func() (local, remote *CausalContext) {
+				local = New()
+				local.Next("x") // local knows "x" but not "a"
+
+				remote = New()
+				remote.Add(Dot{ID: "a", Seq: 3}) // outlier only, no VV
+				remote.Add(Dot{ID: "a", Seq: 5}) // outlier only
+				return
+			},
+			want: map[ReplicaID][]SeqRange{
+				"a": {{Lo: 3, Hi: 3}, {Lo: 5, Hi: 5}},
+			},
+		},
 	}
-	c.Assert(missingEqual(got, want), qt.IsTrue, qt.Commentf("got %v, want %v", got, want))
-}
-
-func TestCausalContextMissingAlreadySynced(t *testing.T) {
-	c := qt.New(t)
-	local := New()
-	local.Next("a")
-	local.Next("a")
-
-	remote := local.Clone()
-
-	got := local.Missing(remote)
-	c.Assert(len(got), qt.Equals, 0)
-}
-
-func TestCausalContextMissingPartiallyBehind(t *testing.T) {
-	c := qt.New(t)
-	local := New()
-	local.Next("a") // a:1
-	local.Next("a") // a:2
-	local.Next("b") // b:1
-
-	remote := New()
-	remote.Next("a") // a:1
-	remote.Next("a") // a:2
-	remote.Next("a") // a:3
-	remote.Next("a") // a:4
-	remote.Next("b") // b:1
-
-	got := local.Missing(remote)
-	want := map[ReplicaID][]SeqRange{
-		"a": {{Lo: 3, Hi: 4}},
-	}
-	c.Assert(missingEqual(got, want), qt.IsTrue, qt.Commentf("got %v, want %v", got, want))
-}
-
-func TestCausalContextMissingHolePunch(t *testing.T) {
-	c := qt.New(t)
-	local := New()
-	local.Add(Dot{ID: "a", Seq: 1})
-	local.Add(Dot{ID: "a", Seq: 2})
-	local.Add(Dot{ID: "a", Seq: 3})
-	local.Add(Dot{ID: "a", Seq: 5}) // outlier — gap at 4
-
-	remote := New()
-	for i := 0; i < 7; i++ {
-		remote.Next("a")
-	}
-
-	got := local.Missing(remote)
-	want := map[ReplicaID][]SeqRange{
-		"a": {{Lo: 4, Hi: 4}, {Lo: 6, Hi: 7}},
-	}
-	c.Assert(missingEqual(got, want), qt.IsTrue, qt.Commentf("got %v, want %v", got, want))
-}
-
-func TestCausalContextMissingHolePunchMultiple(t *testing.T) {
-	c := qt.New(t)
-	local := New()
-	local.Add(Dot{ID: "a", Seq: 1})
-	local.Add(Dot{ID: "a", Seq: 2})
-	local.Add(Dot{ID: "a", Seq: 4}) // outlier
-	local.Add(Dot{ID: "a", Seq: 6}) // outlier
-
-	remote := New()
-	for i := 0; i < 8; i++ {
-		remote.Next("a")
-	}
-
-	got := local.Missing(remote)
-	want := map[ReplicaID][]SeqRange{
-		"a": {{Lo: 3, Hi: 3}, {Lo: 5, Hi: 5}, {Lo: 7, Hi: 8}},
-	}
-	c.Assert(missingEqual(got, want), qt.IsTrue, qt.Commentf("got %v, want %v", got, want))
-}
-
-func TestCausalContextMissingRemoteOutliers(t *testing.T) {
-	c := qt.New(t)
-	local := New()
-	for i := 0; i < 3; i++ {
-		local.Next("a")
-	}
-
-	remote := local.Clone()
-	remote.Add(Dot{ID: "a", Seq: 5}) // outlier
-	remote.Add(Dot{ID: "a", Seq: 7}) // outlier
-
-	got := local.Missing(remote)
-	want := map[ReplicaID][]SeqRange{
-		"a": {{Lo: 5, Hi: 5}, {Lo: 7, Hi: 7}},
-	}
-	c.Assert(missingEqual(got, want), qt.IsTrue, qt.Commentf("got %v, want %v", got, want))
-}
-
-func TestCausalContextMissingRemoteOutlierAlreadyObserved(t *testing.T) {
-	c := qt.New(t)
-	local := New()
-	for i := 0; i < 5; i++ {
-		local.Next("a")
-	}
-
-	remote := New()
-	for i := 0; i < 3; i++ {
-		remote.Next("a")
-	}
-	remote.Add(Dot{ID: "a", Seq: 4}) // outlier, but local has it via VV
-
-	got := local.Missing(remote)
-	c.Assert(len(got), qt.Equals, 0)
-}
-
-func TestCausalContextMissingMixed(t *testing.T) {
-	c := qt.New(t)
-	local := New()
-	local.Add(Dot{ID: "a", Seq: 1})
-	local.Add(Dot{ID: "a", Seq: 2})
-	local.Add(Dot{ID: "a", Seq: 3})
-	local.Add(Dot{ID: "a", Seq: 6}) // outlier (gap at 4,5)
-	local.Add(Dot{ID: "b", Seq: 1})
-	local.Add(Dot{ID: "b", Seq: 2})
-
-	remote := New()
-	for i := 0; i < 5; i++ {
-		remote.Next("a")
-	}
-	for i := 0; i < 4; i++ {
-		remote.Next("b")
-	}
-	remote.Next("c")
-	remote.Add(Dot{ID: "a", Seq: 8}) // outlier
-
-	got := local.Missing(remote)
-	want := map[ReplicaID][]SeqRange{
-		"a": {{Lo: 4, Hi: 5}, {Lo: 8, Hi: 8}},
-		"b": {{Lo: 3, Hi: 4}},
-		"c": {{Lo: 1, Hi: 1}},
-	}
-	c.Assert(missingEqual(got, want), qt.IsTrue, qt.Commentf("got %v, want %v", got, want))
-}
-
-// --- Add edge cases ---
-
-func TestCausalContextAddDuplicate(t *testing.T) {
-	c := qt.New(t)
-	cc := New()
-	cc.Add(Dot{ID: "a", Seq: 1})
-	cc.Add(Dot{ID: "a", Seq: 1}) // duplicate — already in VV
-	c.Assert(cc.Has(Dot{ID: "a", Seq: 1}), qt.IsTrue)
-	c.Assert(cc.Max("a"), qt.Equals, uint64(1))
-}
-
-func TestCausalContextAddDuplicateOutlier(t *testing.T) {
-	c := qt.New(t)
-	cc := New()
-	cc.Add(Dot{ID: "a", Seq: 3}) // outlier
-	cc.Add(Dot{ID: "a", Seq: 3}) // duplicate outlier
-	c.Assert(cc.Has(Dot{ID: "a", Seq: 3}), qt.IsTrue)
-}
-
-// --- Merge properties ---
-
-func TestCausalContextMergeIdempotent(t *testing.T) {
-	c := qt.New(t)
-	cc := New()
-	cc.Add(Dot{ID: "a", Seq: 1})
-	cc.Add(Dot{ID: "a", Seq: 2})
-	cc.Add(Dot{ID: "b", Seq: 1})
-
-	before := cc.Clone()
-	cc.Merge(cc)
-
-	c.Assert(cc.Max("a"), qt.Equals, before.Max("a"))
-	c.Assert(cc.Max("b"), qt.Equals, before.Max("b"))
-}
-
-func TestCausalContextMergeCommutative(t *testing.T) {
-	c := qt.New(t)
-	a := New()
-	a.Add(Dot{ID: "x", Seq: 1})
-	a.Add(Dot{ID: "x", Seq: 2})
-
-	b := New()
-	b.Add(Dot{ID: "x", Seq: 3})
-	b.Add(Dot{ID: "y", Seq: 1})
-
-	ab := a.Clone()
-	ab.Merge(b)
-
-	ba := b.Clone()
-	ba.Merge(a)
-
-	for _, d := range []Dot{
-		{ID: "x", Seq: 1}, {ID: "x", Seq: 2},
-		{ID: "x", Seq: 3}, {ID: "y", Seq: 1},
-	} {
-		c.Assert(ab.Has(d), qt.Equals, ba.Has(d), qt.Commentf("dot %v", d))
+	for _, tc := range tcs {
+		c.Run(tc.name, func(c *qt.C) {
+			local, remote := tc.setupFn()
+			got := local.Missing(remote)
+			if tc.want == nil {
+				c.Assert(len(got), qt.Equals, 0)
+			} else {
+				c.Assert(missingEqual(got, tc.want), qt.IsTrue, qt.Commentf("got %v, want %v", got, tc.want))
+			}
+		})
 	}
 }
 
-// --- Compact edge cases ---
-
-func TestCausalContextCompactEmpty(t *testing.T) {
+func TestCausalContextMerge(t *testing.T) {
 	c := qt.New(t)
-	cc := New()
-	cc.Compact() // should not panic
-	c.Assert(cc.Max("a"), qt.Equals, uint64(0))
+
+	c.Run("Basic", func(c *qt.C) {
+		a := New()
+		a.Add(Dot{ID: "x", Seq: 1})
+		a.Add(Dot{ID: "x", Seq: 2})
+
+		b := New()
+		b.Add(Dot{ID: "x", Seq: 1})
+		b.Add(Dot{ID: "x", Seq: 2})
+		b.Add(Dot{ID: "x", Seq: 3})
+		b.Add(Dot{ID: "y", Seq: 1})
+
+		a.Merge(b)
+
+		for _, d := range []Dot{
+			{ID: "x", Seq: 1},
+			{ID: "x", Seq: 2},
+			{ID: "x", Seq: 3},
+			{ID: "y", Seq: 1},
+		} {
+			c.Assert(a.Has(d), qt.IsTrue, qt.Commentf("dot %v", d))
+		}
+	})
+
+	c.Run("Idempotent", func(c *qt.C) {
+		cc := New()
+		cc.Add(Dot{ID: "a", Seq: 1})
+		cc.Add(Dot{ID: "a", Seq: 2})
+		cc.Add(Dot{ID: "b", Seq: 1})
+
+		before := cc.Clone()
+		cc.Merge(cc)
+
+		c.Assert(cc.Max("a"), qt.Equals, before.Max("a"))
+		c.Assert(cc.Max("b"), qt.Equals, before.Max("b"))
+	})
+
+	c.Run("Commutative", func(c *qt.C) {
+		a := New()
+		a.Add(Dot{ID: "x", Seq: 1})
+		a.Add(Dot{ID: "x", Seq: 2})
+
+		b := New()
+		b.Add(Dot{ID: "x", Seq: 3})
+		b.Add(Dot{ID: "y", Seq: 1})
+
+		ab := a.Clone()
+		ab.Merge(b)
+
+		ba := b.Clone()
+		ba.Merge(a)
+
+		for _, d := range []Dot{
+			{ID: "x", Seq: 1}, {ID: "x", Seq: 2},
+			{ID: "x", Seq: 3}, {ID: "y", Seq: 1},
+		} {
+			c.Assert(ab.Has(d), qt.Equals, ba.Has(d), qt.Commentf("dot %v", d))
+		}
+	})
 }
-
-func TestCausalContextCompactNoOutliers(t *testing.T) {
-	c := qt.New(t)
-	cc := New()
-	cc.Next("a")
-	cc.Next("a")
-	cc.Compact() // nothing to promote
-	c.Assert(cc.Max("a"), qt.Equals, uint64(2))
-}
-
-func TestCausalContextCompactIdempotent(t *testing.T) {
-	c := qt.New(t)
-	cc := New()
-	cc.Next("a")
-	cc.Next("a")
-	cc.Add(Dot{ID: "a", Seq: 5}) // outlier
-	cc.Add(Dot{ID: "b", Seq: 3}) // outlier
-
-	cc.Compact()
-	snapshot := cc.Clone()
-
-	cc.Compact() // second call should be a no-op
-	c.Assert(cc.Max("a"), qt.Equals, snapshot.Max("a"))
-	c.Assert(cc.Max("b"), qt.Equals, snapshot.Max("b"))
-	c.Assert(cc.Has(Dot{ID: "a", Seq: 5}), qt.Equals, snapshot.Has(Dot{ID: "a", Seq: 5}))
-	c.Assert(cc.Has(Dot{ID: "b", Seq: 3}), qt.Equals, snapshot.Has(Dot{ID: "b", Seq: 3}))
-}
-
-// --- ReplicaIDs ---
 
 func TestCausalContextReplicaIDs(t *testing.T) {
 	c := qt.New(t)
-	cc := New()
-	cc.Add(Dot{ID: "a", Seq: 1})
-	cc.Add(Dot{ID: "b", Seq: 1})
-	cc.Add(Dot{ID: "c", Seq: 5}) // outlier — c only via outliers
 
-	ids := cc.ReplicaIDs()
-	seen := make(map[ReplicaID]bool)
-	for _, id := range ids {
-		seen[id] = true
-	}
-	c.Assert(seen["a"], qt.IsTrue)
-	c.Assert(seen["b"], qt.IsTrue)
-	c.Assert(seen["c"], qt.IsTrue)
-	c.Assert(len(ids), qt.Equals, 3)
-}
+	c.Run("WithDots", func(c *qt.C) {
+		cc := New()
+		cc.Add(Dot{ID: "a", Seq: 1})
+		cc.Add(Dot{ID: "b", Seq: 1})
+		cc.Add(Dot{ID: "c", Seq: 5}) // outlier — c only via outliers
 
-func TestCausalContextReplicaIDsEmpty(t *testing.T) {
-	c := qt.New(t)
-	cc := New()
-	c.Assert(cc.ReplicaIDs(), qt.HasLen, 0)
+		ids := cc.ReplicaIDs()
+		seen := make(map[ReplicaID]bool)
+		for _, id := range ids {
+			seen[id] = true
+		}
+		c.Assert(seen["a"], qt.IsTrue)
+		c.Assert(seen["b"], qt.IsTrue)
+		c.Assert(seen["c"], qt.IsTrue)
+		c.Assert(len(ids), qt.Equals, 3)
+	})
+
+	c.Run("Empty", func(c *qt.C) {
+		cc := New()
+		c.Assert(cc.ReplicaIDs(), qt.HasLen, 0)
+	})
 }
 
 // --- Missing symmetry ---
@@ -463,49 +508,6 @@ func TestCausalContextMissingAsymmetric(t *testing.T) {
 	c.Assert(bMissing["y"][0], qt.Equals, SeqRange{Lo: 1, Hi: 1})
 	_, hasZ := bMissing["z"]
 	c.Assert(hasZ, qt.IsFalse) // b already has z:1
-}
-
-// TestCausalContextMissingPureOutliers verifies Missing() when both
-// sides have only outliers (no contiguous VV entries) for a replica.
-func TestCausalContextMissingPureOutliers(t *testing.T) {
-	c := qt.New(t)
-
-	// Local has only outliers for "a" — no VV entry (VV["a"] == 0).
-	local := New()
-	local.Add(Dot{ID: "a", Seq: 3}) // outlier
-	local.Add(Dot{ID: "a", Seq: 5}) // outlier
-
-	// Remote also has only outliers for "a", some overlapping.
-	remote := New()
-	remote.Add(Dot{ID: "a", Seq: 2}) // outlier, local doesn't have
-	remote.Add(Dot{ID: "a", Seq: 5}) // outlier, local has this one
-	remote.Add(Dot{ID: "a", Seq: 7}) // outlier, local doesn't have
-
-	got := local.Missing(remote)
-	// Local is missing a:2 and a:7 from remote. a:5 is already observed.
-	want := map[ReplicaID][]SeqRange{
-		"a": {{Lo: 2, Hi: 2}, {Lo: 7, Hi: 7}},
-	}
-	c.Assert(missingEqual(got, want), qt.IsTrue, qt.Commentf("got %v, want %v", got, want))
-}
-
-// TestCausalContextMissingPureOutliersNewReplica verifies Missing()
-// when the remote has a replica unknown to the local, using only outliers.
-func TestCausalContextMissingPureOutliersNewReplica(t *testing.T) {
-	c := qt.New(t)
-
-	local := New()
-	local.Next("x") // local knows "x" but not "a"
-
-	remote := New()
-	remote.Add(Dot{ID: "a", Seq: 3}) // outlier only, no VV
-	remote.Add(Dot{ID: "a", Seq: 5}) // outlier only
-
-	got := local.Missing(remote)
-	want := map[ReplicaID][]SeqRange{
-		"a": {{Lo: 3, Hi: 3}, {Lo: 5, Hi: 5}},
-	}
-	c.Assert(missingEqual(got, want), qt.IsTrue, qt.Commentf("got %v, want %v", got, want))
 }
 
 func TestMergeRanges(t *testing.T) {
