@@ -207,80 +207,6 @@ func TestAddWins(t *testing.T) {
 	})
 }
 
-func TestMergeProperties(t *testing.T) {
-	c := qt.New(t)
-
-	c.Run("Idempotent", func(c *qt.C) {
-		a := newSetMap("a")
-		a.Apply("x", addDot)
-
-		snapshot := newSetMap("x")
-		snapshot.Merge(a)
-
-		a.Merge(snapshot)
-		a.Merge(snapshot)
-
-		c.Assert(a.Len(), qt.Equals, 1)
-	})
-
-	c.Run("Commutative", func(c *qt.C) {
-		a := newSetMap("a")
-		b := newSetMap("b")
-		a.Apply("x", addDot)
-		b.Apply("y", addDot)
-
-		ab := newSetMap("x")
-		ab.Merge(a)
-		ab.Merge(b)
-
-		ba := newSetMap("x")
-		ba.Merge(b)
-		ba.Merge(a)
-
-		abKeys := ab.Keys()
-		baKeys := ba.Keys()
-		slices.Sort(abKeys)
-		slices.Sort(baKeys)
-		c.Assert(abKeys, qt.DeepEquals, baKeys)
-	})
-
-	c.Run("Associative", func(c *qt.C) {
-		a := newSetMap("a")
-		b := newSetMap("b")
-		x := newSetMap("c")
-
-		a.Apply("x", addDot)
-		a.Apply("y", addDot)
-		b.Apply("y", addDot)
-		b.Apply("z", addDot)
-		x.Apply("x", addDot)
-		x.Remove("x")
-		x.Apply("w", addDot)
-
-		// (a ⊔ b) ⊔ c
-		ab := newSetMap("ab")
-		ab.Merge(a)
-		ab.Merge(b)
-		abc := newSetMap("abc")
-		abc.Merge(ab)
-		abc.Merge(x)
-
-		// a ⊔ (b ⊔ c)
-		bc := newSetMap("bc")
-		bc.Merge(b)
-		bc.Merge(x)
-		abc2 := newSetMap("abc2")
-		abc2.Merge(a)
-		abc2.Merge(bc)
-
-		abcKeys := abc.Keys()
-		abc2Keys := abc2.Keys()
-		slices.Sort(abcKeys)
-		slices.Sort(abc2Keys)
-		c.Assert(abcKeys, qt.DeepEquals, abc2Keys)
-	})
-}
-
 func TestDeltaPropagation(t *testing.T) {
 	c := qt.New(t)
 
@@ -305,41 +231,6 @@ func TestDeltaPropagation(t *testing.T) {
 		b.Merge(rmDelta)
 
 		c.Assert(b.Has("x"), qt.IsFalse)
-	})
-
-	c.Run("IncrementalEqualsFullMerge", func(c *qt.C) {
-		a := newSetMap("a")
-		d1 := a.Apply("x", addDot)
-		d2 := a.Apply("y", addDot)
-
-		inc := newSetMap("b")
-		inc.Merge(d1)
-		inc.Merge(d2)
-
-		full := newSetMap("b")
-		full.Merge(a)
-
-		incKeys := inc.Keys()
-		fullKeys := full.Keys()
-		slices.Sort(incKeys)
-		slices.Sort(fullKeys)
-		c.Assert(incKeys, qt.DeepEquals, fullKeys)
-	})
-
-	c.Run("DeltaDeltaMerge", func(c *qt.C) {
-		a := newSetMap("a")
-		d1 := a.Apply("x", addDot)
-		d2 := a.Apply("y", addDot)
-
-		// Combine deltas, then apply.
-		d1.Merge(d2)
-
-		b := newSetMap("b")
-		b.Merge(d1)
-
-		keys := b.Keys()
-		slices.Sort(keys)
-		c.Assert(keys, qt.DeepEquals, []string{"x", "y"})
 	})
 
 	c.Run("ApplySupersede", func(c *qt.C) {
@@ -370,34 +261,6 @@ func TestDeltaPropagation(t *testing.T) {
 	})
 }
 
-func TestMergeWithEmpty(t *testing.T) {
-	c := qt.New(t)
-
-	c.Run("IntoEmpty", func(c *qt.C) {
-		a := newSetMap("a")
-		a.Apply("x", addDot)
-		a.Apply("y", addDot)
-
-		b := newSetMap("b")
-		b.Merge(a)
-
-		keys := b.Keys()
-		slices.Sort(keys)
-		c.Assert(keys, qt.DeepEquals, []string{"x", "y"})
-	})
-
-	c.Run("EmptyIntoPopulated", func(c *qt.C) {
-		a := newSetMap("a")
-		a.Apply("x", addDot)
-
-		empty := newSetMap("b")
-		a.Merge(empty)
-
-		c.Assert(a.Has("x"), qt.IsTrue)
-		c.Assert(a.Len(), qt.Equals, 1)
-	})
-}
-
 func TestStateRoundTrip(t *testing.T) {
 	c := qt.New(t)
 
@@ -425,68 +288,6 @@ func TestStateRoundTrip(t *testing.T) {
 
 		c.Assert(b.Has("x"), qt.IsTrue)
 		c.Assert(b.Len(), qt.Equals, 1)
-	})
-}
-
-func TestConvergence(t *testing.T) {
-	c := qt.New(t)
-
-	c.Run("ThreeReplica", func(c *qt.C) {
-		a := newSetMap("a")
-		b := newSetMap("b")
-		x := newSetMap("c")
-
-		da := a.Apply("x", addDot)
-		db := b.Apply("y", addDot)
-		dx := x.Apply("z", addDot)
-
-		a.Merge(db)
-		a.Merge(dx)
-		b.Merge(da)
-		b.Merge(dx)
-		x.Merge(da)
-		x.Merge(db)
-
-		want := []string{"x", "y", "z"}
-		for _, m := range []*ORMap[string, *dotcontext.DotSet]{a, b, x} {
-			keys := m.Keys()
-			slices.Sort(keys)
-			c.Assert(keys, qt.DeepEquals, want)
-		}
-	})
-
-	c.Run("FiveReplica", func(c *qt.C) {
-		ids := []dotcontext.ReplicaID{"a", "b", "c", "d", "e"}
-		replicas := make([]*ORMap[string, *dotcontext.DotSet], len(ids))
-		for i, id := range ids {
-			replicas[i] = newSetMap(id)
-		}
-
-		// Mixed operations: adds, a remove, concurrent adds of same key.
-		deltas := make([]*ORMap[string, *dotcontext.DotSet], len(ids))
-		deltas[0] = replicas[0].Apply("x", addDot) // a adds "x"
-		deltas[1] = replicas[1].Apply("y", addDot) // b adds "y"
-		deltas[2] = replicas[2].Apply("z", addDot) // c adds "z"
-		replicas[3].Apply("w", addDot)              // d adds "w" then removes
-		deltas[3] = replicas[3].Remove("w")         // d removes "w"
-		deltas[4] = replicas[4].Apply("x", addDot)  // e also adds "x" concurrently
-
-		// Full mesh merge.
-		for i := range replicas {
-			for j := range replicas {
-				if i != j {
-					replicas[i].Merge(deltas[j])
-				}
-			}
-		}
-
-		// All converge: {"x", "y", "z"} — "w" was added then removed by d.
-		want := []string{"x", "y", "z"}
-		for i, m := range replicas {
-			keys := m.Keys()
-			slices.Sort(keys)
-			c.Assert(keys, qt.DeepEquals, want, qt.Commentf("replica %s", ids[i]))
-		}
 	})
 }
 

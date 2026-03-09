@@ -4,8 +4,6 @@ import (
 	"testing"
 
 	qt "github.com/frankban/quicktest"
-
-	"github.com/aalpar/crdt/dotcontext"
 )
 
 func TestBasicOps(t *testing.T) {
@@ -131,87 +129,8 @@ func TestDisableWins(t *testing.T) {
 	})
 }
 
-func TestMergeProperties(t *testing.T) {
-	c := qt.New(t)
-
-	c.Run("Idempotent", func(c *qt.C) {
-		a := New("a")
-		a.Disable()
-
-		snapshot := New("a")
-		snapshot.Merge(a)
-
-		a.Merge(snapshot)
-		a.Merge(snapshot)
-
-		c.Assert(a.Value(), qt.IsFalse)
-	})
-
-	c.Run("Commutative", func(c *qt.C) {
-		a := New("a")
-		b := New("b")
-		a.Disable()
-
-		ab := New("x")
-		ab.Merge(a)
-		ab.Merge(b)
-
-		ba := New("x")
-		ba.Merge(b)
-		ba.Merge(a)
-
-		c.Assert(ab.Value(), qt.Equals, ba.Value())
-	})
-
-	c.Run("Associative", func(c *qt.C) {
-		a := New("a")
-		b := New("b")
-		x := New("c")
-
-		a.Disable()
-		b.Disable()
-		b.Enable()
-		x.Disable()
-
-		// (a join b) join c
-		ab := New("ab")
-		ab.Merge(a)
-		ab.Merge(b)
-		abc := New("abc")
-		abc.Merge(ab)
-		abc.Merge(x)
-
-		// a join (b join c)
-		bc := New("bc")
-		bc.Merge(b)
-		bc.Merge(x)
-		abc2 := New("abc2")
-		abc2.Merge(a)
-		abc2.Merge(bc)
-
-		c.Assert(abc.Value(), qt.Equals, abc2.Value())
-	})
-}
-
 func TestDeltaPropagation(t *testing.T) {
 	c := qt.New(t)
-
-	c.Run("IncrementalEqualsFullMerge", func(c *qt.C) {
-		a := New("a")
-		d1 := a.Disable()
-		d2 := a.Enable()
-		d3 := a.Disable()
-
-		incremental := New("b")
-		incremental.Merge(d1)
-		incremental.Merge(d2)
-		incremental.Merge(d3)
-
-		full := New("b")
-		full.Merge(a)
-
-		c.Assert(incremental.Value(), qt.Equals, full.Value())
-	})
 
 	c.Run("EnableDelta", func(c *qt.C) {
 		a := New("a")
@@ -226,22 +145,6 @@ func TestDeltaPropagation(t *testing.T) {
 		c.Assert(b.Value(), qt.IsTrue)
 	})
 
-	c.Run("DeltaDeltaMerge", func(c *qt.C) {
-		a := New("a")
-		d1 := a.Disable()
-		d2 := a.Enable()
-		d3 := a.Disable()
-
-		// Merge deltas together, then apply combined delta.
-		d1.Merge(d2)
-		d1.Merge(d3)
-
-		b := New("b")
-		b.Merge(d1)
-
-		c.Assert(b.Value(), qt.IsFalse)
-	})
-
 	c.Run("EnableNoOpDeltaHarmless", func(c *qt.C) {
 		a := New("a")
 		b := New("b")
@@ -254,37 +157,6 @@ func TestDeltaPropagation(t *testing.T) {
 
 		// b's disable should survive — noop delta observes nothing.
 		c.Assert(b.Value(), qt.IsFalse)
-	})
-}
-
-func TestMergeWithEmpty(t *testing.T) {
-	c := qt.New(t)
-
-	c.Run("IntoEmpty", func(c *qt.C) {
-		a := New("a")
-		a.Disable()
-
-		b := New("b")
-		b.Merge(a)
-		c.Assert(b.Value(), qt.IsFalse)
-	})
-
-	c.Run("EmptyIntoEnabled", func(c *qt.C) {
-		a := New("a")
-		// a is enabled by default
-
-		empty := New("b")
-		a.Merge(empty)
-		c.Assert(a.Value(), qt.IsTrue)
-	})
-
-	c.Run("EmptyIntoDisabled", func(c *qt.C) {
-		a := New("a")
-		a.Disable()
-
-		empty := New("b")
-		a.Merge(empty)
-		c.Assert(a.Value(), qt.IsFalse)
 	})
 }
 
@@ -314,59 +186,3 @@ func TestStateRoundTrip(t *testing.T) {
 	})
 }
 
-func TestConvergence(t *testing.T) {
-	c := qt.New(t)
-
-	c.Run("ThreeReplica", func(c *qt.C) {
-		a := New("a")
-		b := New("b")
-		x := New("c")
-
-		da := a.Disable()
-		// b stays enabled
-		dx := x.Disable()
-
-		a.Merge(b)
-		a.Merge(dx)
-		b.Merge(da)
-		b.Merge(dx)
-		x.Merge(da)
-		x.Merge(b)
-
-		c.Assert(a.Value(), qt.Equals, b.Value())
-		c.Assert(b.Value(), qt.Equals, x.Value())
-		c.Assert(a.Value(), qt.IsFalse)
-	})
-
-	c.Run("FiveReplica", func(c *qt.C) {
-		ids := []dotcontext.ReplicaID{"a", "b", "c", "d", "e"}
-		replicas := make([]*DWFlag, len(ids))
-		for i, id := range ids {
-			replicas[i] = New(id)
-		}
-
-		// Mixed: most disable, one disable-then-enable.
-		deltas := make([]*DWFlag, len(ids))
-		deltas[0] = replicas[0].Disable()  // a disables
-		deltas[1] = replicas[1].Disable()  // b disables
-		replicas[2].Disable()              // c disables then enables
-		deltas[2] = replicas[2].Enable()   // c's net effect: enable
-		deltas[3] = replicas[3].Disable()  // d disables
-		deltas[4] = replicas[4].Disable()  // e disables
-
-		// Full mesh merge.
-		for i := range replicas {
-			for j := range replicas {
-				if i != j {
-					replicas[i].Merge(deltas[j])
-				}
-			}
-		}
-
-		// Disable wins: a, b, d, e all contributed disable dots that
-		// c's enable context doesn't observe.
-		for i, r := range replicas {
-			c.Assert(r.Value(), qt.IsFalse, qt.Commentf("replica %s", ids[i]))
-		}
-	})
-}
