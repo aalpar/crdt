@@ -18,7 +18,7 @@ Zero external dependencies. All types backed by stdlib maps.
 |------|---------|
 | `Dot` | Unique event identifier (replica, seq) |
 | `CausalContext` | Compressed observed-dot set (version vector + outliers) |
-| `DotStore` | Interface: `Dots() *DotSet` + `HasDots() bool` |
+| `DotStore` | Interface: `Dots() *DotSet` + `HasDots() bool` + `CloneStore() DotStore` |
 | `DotSet` | Set of dots — `P(I × N)` |
 | `DotFun[V Lattice[V]]` | Dots mapped to lattice values |
 | `DotMap[K, V DotStore]` | Keys mapped to nested dot stores |
@@ -60,6 +60,8 @@ Each composes dotcontext types. Mutators return deltas for replication.
 - `Merge()` uses a sorted-merge pass for outliers (O(m+n)), not per-element insert
 - Decode errors are typed (`*DecodeLimitError`) — use `errors.As` to distinguish malformed input from I/O errors
 - `CausalCodec[T]` satisfies `Codec[Causal[T]]` directly — no wrapper types needed for codec composition
+- `DotMap.Clone()` is deep — calls `v.CloneStore().(V)` per entry; `DotSet.Clone()` and `DotFun.Clone()` are also deep. The `CloneStore() DotStore` method on the interface enables recursive cloning without type switches.
+- `JoinDotMap` pre-computes a single `emptyV()` and reuses it for all key-misses (join functions never mutate inputs)
 - `pncounter` and `gcounter` share the same find-own-dot/replace/build-delta pattern (int64 vs uint64); cross-referenced via NOTE comments
 
 ## Package Map
