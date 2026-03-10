@@ -1,6 +1,7 @@
 package rga
 
 import (
+	"bytes"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -357,5 +358,86 @@ func TestStateRoundTrip(t *testing.T) {
 		be := b.Elements()
 		c.Assert(be, qt.HasLen, 1)
 		c.Assert(be[0].Value, qt.Equals, "x")
+	})
+}
+
+func TestCodecRoundTrip(t *testing.T) {
+	c := qt.New(t)
+
+	codec := dotcontext.CausalCodec[*dotcontext.DotFun[Node[string]]]{
+		StoreCodec: dotcontext.DotFunCodec[Node[string]]{
+			ValueCodec: NodeCodec[string]{ValueCodec: dotcontext.StringCodec{}},
+		},
+	}
+
+	c.Run("EmptyRGA", func(c *qt.C) {
+		r := New[string]("a")
+		var buf bytes.Buffer
+		c.Assert(codec.Encode(&buf, r.State()), qt.IsNil)
+
+		decoded, err := codec.Decode(&buf)
+		c.Assert(err, qt.IsNil)
+
+		got := FromCausal[string](decoded)
+		c.Assert(got.Len(), qt.Equals, 0)
+	})
+
+	c.Run("WithElements", func(c *qt.C) {
+		r := New[string]("a")
+		r.InsertAfter(dotcontext.Dot{}, "hello")
+		hDot := r.Elements()[0].ID
+		r.InsertAfter(hDot, "world")
+
+		var buf bytes.Buffer
+		c.Assert(codec.Encode(&buf, r.State()), qt.IsNil)
+
+		decoded, err := codec.Decode(&buf)
+		c.Assert(err, qt.IsNil)
+
+		got := FromCausal[string](decoded)
+		elems := got.Elements()
+		c.Assert(elems, qt.HasLen, 2)
+		c.Assert(elems[0].Value, qt.Equals, "hello")
+		c.Assert(elems[1].Value, qt.Equals, "world")
+	})
+
+	c.Run("WithTombstones", func(c *qt.C) {
+		r := New[string]("a")
+		r.InsertAfter(dotcontext.Dot{}, "alive")
+		aDot := r.Elements()[0].ID
+		r.InsertAfter(aDot, "dead")
+		dDot := r.Elements()[1].ID
+		r.InsertAfter(dDot, "also-alive")
+		r.Delete(dDot)
+
+		var buf bytes.Buffer
+		c.Assert(codec.Encode(&buf, r.State()), qt.IsNil)
+
+		decoded, err := codec.Decode(&buf)
+		c.Assert(err, qt.IsNil)
+
+		got := FromCausal[string](decoded)
+		elems := got.Elements()
+		c.Assert(elems, qt.HasLen, 2)
+		c.Assert(elems[0].Value, qt.Equals, "alive")
+		c.Assert(elems[1].Value, qt.Equals, "also-alive")
+	})
+
+	c.Run("DeltaRoundTrip", func(c *qt.C) {
+		a := New[string]("a")
+		delta := a.InsertAfter(dotcontext.Dot{}, "x")
+
+		var buf bytes.Buffer
+		c.Assert(codec.Encode(&buf, delta.State()), qt.IsNil)
+
+		decoded, err := codec.Decode(&buf)
+		c.Assert(err, qt.IsNil)
+
+		b := New[string]("b")
+		b.Merge(FromCausal[string](decoded))
+
+		elems := b.Elements()
+		c.Assert(elems, qt.HasLen, 1)
+		c.Assert(elems[0].Value, qt.Equals, "x")
 	})
 }

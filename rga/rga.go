@@ -1,6 +1,7 @@
 package rga
 
 import (
+	"io"
 	"sort"
 
 	"github.com/aalpar/crdt/dotcontext"
@@ -213,6 +214,42 @@ func (r *RGA[E]) linearize() []dotcontext.Dot {
 	dfs(dotcontext.Dot{})
 
 	return result
+}
+
+// NodeCodec encodes a Node[E] as [V: value] [Dot: after] [byte: deleted].
+type NodeCodec[E comparable] struct {
+	ValueCodec dotcontext.Codec[E]
+}
+
+func (c NodeCodec[E]) Encode(w io.Writer, n Node[E]) error {
+	if err := c.ValueCodec.Encode(w, n.Value); err != nil {
+		return err
+	}
+	if err := (dotcontext.DotCodec{}).Encode(w, n.After); err != nil {
+		return err
+	}
+	var b [1]byte
+	if n.Deleted {
+		b[0] = 1
+	}
+	_, err := w.Write(b[:])
+	return err
+}
+
+func (c NodeCodec[E]) Decode(r io.Reader) (Node[E], error) {
+	val, err := c.ValueCodec.Decode(r)
+	if err != nil {
+		return Node[E]{}, err
+	}
+	after, err := (dotcontext.DotCodec{}).Decode(r)
+	if err != nil {
+		return Node[E]{}, err
+	}
+	var b [1]byte
+	if _, err := io.ReadFull(r, b[:]); err != nil {
+		return Node[E]{}, err
+	}
+	return Node[E]{Value: val, After: after, Deleted: b[0] != 0}, nil
 }
 
 func (r *RGA[E]) emptyDelta() *RGA[E] {
