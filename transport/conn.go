@@ -66,18 +66,15 @@ type Conn struct {
 
 // writeFrame writes a length-prefixed, type-tagged frame.
 // Wire format: [uint32 big-endian payload length] [uint8 tag] [payload].
+// Header and payload are written in a single call to avoid blocking
+// on synchronous transports (e.g. net.Pipe).
 func writeFrame(w io.Writer, tag uint8, payload []byte) error {
-	var hdr [5]byte
-	binary.BigEndian.PutUint32(hdr[:4], uint32(len(payload)))
-	hdr[4] = tag
-	if _, err := w.Write(hdr[:]); err != nil {
-		return err
-	}
-	if len(payload) > 0 {
-		_, err := w.Write(payload)
-		return err
-	}
-	return nil
+	buf := make([]byte, 5+len(payload))
+	binary.BigEndian.PutUint32(buf[:4], uint32(len(payload)))
+	buf[4] = tag
+	copy(buf[5:], payload)
+	_, err := w.Write(buf)
+	return err
 }
 
 // readFrame reads one length-prefixed, type-tagged frame.
@@ -100,3 +97,86 @@ func readFrame(r io.Reader, maxMsg uint32) (uint8, []byte, error) {
 	}
 	return tag, payload, nil
 }
+
+// NewConn performs a handshake over raw and returns a framed Conn.
+// Both sides send their ID concurrently to avoid deadlock.
+func NewConn(raw net.Conn, localID string, opts ...ConnOption) (*Conn, error) {
+	c := &Conn{raw: raw, maxMsg: defaultMaxMsg}
+	for _, o := range opts {
+		o(c)
+	}
+
+	// Read peer's Hello in a goroutine while we send ours.
+	type helloResult struct {
+		peerID string
+		err    error
+	}
+	ch := make(chan helloResult, 1)
+	go func() {
+		tag, payload, err := readFrame(raw, c.maxMsg)
+		if err != nil {
+			ch <- helloResult{err: err}
+			return
+		}
+		if tag != tagHello {
+			ch <- helloResult{err: fmt.Errorf("handshake: expected hello (tag 0x00), got 0x%02x", tag)}
+			return
+		}
+		ch <- helloResult{peerID: string(payload)}
+	}()
+
+	if err := writeFrame(raw, tagHello, []byte(localID)); err != nil {
+		raw.Close()
+		return nil, err
+	}
+
+	r := <-ch
+	if r.err != nil {
+		raw.Close()
+		return nil, r.err
+	}
+	c.peerID = r.peerID
+	return c, nil
+}
+
+// PeerID returns the remote peer's replica ID, received during handshake.
+func (c *Conn) PeerID() string { return c.peerID }
+
+// SendDeltaBatch sends a DeltaBatch message with the given payload.
+// Safe for concurrent use.
+func (c *Conn) SendDeltaBatch(payload []byte) error {
+	if len(payload) > int(c.maxMsg) {
+		return fmt.Errorf("payload length %d exceeds max %d", len(payload), c.maxMsg)
+	}
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	return writeFrame(c.raw, tagDeltaBatch, payload)
+}
+
+// SendAck sends an Ack message with the given payload.
+// Safe for concurrent use.
+func (c *Conn) SendAck(payload []byte) error {
+	if len(payload) > int(c.maxMsg) {
+		return fmt.Errorf("payload length %d exceeds max %d", len(payload), c.maxMsg)
+	}
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	return writeFrame(c.raw, tagAck, payload)
+}
+
+// Receive reads the next message from the connection.
+// Must be called from a single goroutine (the read loop).
+// Returns errUnexpectedHello if a Hello frame arrives after handshake.
+func (c *Conn) Receive() (MessageType, []byte, error) {
+	tag, payload, err := readFrame(c.raw, c.maxMsg)
+	if err != nil {
+		return 0, nil, err
+	}
+	if tag == tagHello {
+		return 0, nil, errUnexpectedHello
+	}
+	return MessageType(tag), payload, nil
+}
+
+// Close closes the underlying network connection.
+func (c *Conn) Close() error { return c.raw.Close() }
