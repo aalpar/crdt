@@ -11,7 +11,7 @@
 - [x] `SeqRange` type, `MissingCodec`, fuzz round-trip
 - [x] `DeltaStore.Fetch()` composable with `Missing()` return type
 
-661 tests passing across all packages (includes semilattice property checks, fuzz seed corpus).
+768 tests passing across all packages (includes semilattice property checks, fuzz seed corpus).
 
 ## Higher-level CRDTs (compose dotcontext)
 
@@ -27,6 +27,7 @@
 - [x] `ewflag` — enable-wins flag (`DotSet` — simplest possible CRDT)
 - [x] `dwflag` — disable-wins flag (complement of ewflag)
 - [x] `rwset` — remove-wins observed-remove set (dual of AWSet)
+- [x] `rga` — replicated growable array (`DotFun[Node[E]]`, immutable elements, tombstone ordering)
 
 ## Optimization
 

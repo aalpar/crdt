@@ -59,6 +59,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 | `ewflag/` | `EWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → enable wins |
 | `dwflag/` | `DWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → disable wins |
 | `mvregister/` | `MVRegister[V]` | `DotFun[Entry[V]]` | All concurrent writes preserved |
+| `rga/` | `RGA[E]` | `DotFun[Node[E]]` | Concurrent inserts ordered by dot; tombstone anchoring |
 
 ### Key Design Decisions
 
@@ -89,6 +90,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 | `ewflag/` | EWFlag | 2 source + 2 test |
 | `dwflag/` | DWFlag | 2 source + 2 test |
 | `mvregister/` | MVRegister | 2 source + 2 test |
+| `rga/` | RGA, Node, Element | 2 source + 2 test |
 | `replication/` | PeerTracker, GC, WriteDeltaBatch | 4 source + 4 test |
 
 ### Shared Test Harness: `crdttest/`
@@ -101,7 +103,7 @@ End-to-end tests exercise the full pipeline: mutate → store delta → `WriteDe
 
 ## Testing
 
-- `go test ./...` — 661 tests across all packages
+- `go test ./...` — 768 tests across all packages
 - `go test -race ./...` — race detector
 - `go test -fuzz=FuzzJoinDotSetSemilattice ./dotcontext/` — fuzz semilattice properties
 - `make benchmark` — benchmarks across all packages
