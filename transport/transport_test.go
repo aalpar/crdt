@@ -162,7 +162,7 @@ func TestTransportDuplicatePeer(t *testing.T) {
 	// Second "bob" tries to connect — should be rejected.
 	h3 := newTestHandler()
 	t3 := New("bob", h3)
-	err = t3.Connect(ln.Addr().String())
+	_ = t3.Connect(ln.Addr().String())
 	// The listener side (t1) sees the duplicate peerID and closes the
 	// new connection. t1 should still have exactly one "bob".
 	c.Assert(t1.Peers(), qt.HasLen, 1)
