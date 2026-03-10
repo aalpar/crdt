@@ -88,6 +88,40 @@ func TestDeltaReturn(t *testing.T) {
 	})
 }
 
+func TestDeltaPropagation(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("RemoveDelta", func(c *qt.C) {
+		a := New[string]("a")
+		b := New[string]("b")
+
+		addDelta := a.Add("x")
+		b.Merge(addDelta)
+
+		rmDelta := a.Remove("x")
+		b.Merge(rmDelta)
+
+		c.Assert(b.Has("x"), qt.IsFalse)
+	})
+
+	c.Run("AddAfterRemoveDelta", func(c *qt.C) {
+		a := New[string]("a")
+		b := New[string]("b")
+
+		addDelta := a.Add("x")
+		b.Merge(addDelta)
+
+		rmDelta := b.Remove("x")
+		a.Merge(rmDelta)
+
+		reAddDelta := a.Add("x")
+		b.Merge(reAddDelta)
+
+		c.Assert(a.Has("x"), qt.IsTrue)
+		c.Assert(b.Has("x"), qt.IsTrue)
+	})
+}
+
 func TestRemoveWins(t *testing.T) {
 	c := qt.New(t)
 
