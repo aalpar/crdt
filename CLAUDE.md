@@ -92,6 +92,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 | `mvregister/` | MVRegister | 2 source + 2 test |
 | `rga/` | RGA, Node, Element | 2 source + 2 test |
 | `replication/` | PeerTracker, GC, WriteDeltaBatch | 4 source + 4 test |
+| `transport/` | Conn, Transport, Handler, PeerError | 3 source + 3 test |
 
 ### Shared Test Harness: `crdttest/`
 
