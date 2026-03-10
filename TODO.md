@@ -38,6 +38,10 @@
 - [x] Pre-sized map hints in join results — `newDotSetSized(a.Len()+b.Len())` in `JoinDotSetStore`, `JoinDotFunStore`, and `JoinDotMap`. Eliminates map growth doublings. (1000 disjoint dots: −31% ns, −32% B, −48% allocs; DotFun 1000: −32% ns, −33% B)
 - [x] In-place "merge delta into state" join path — `MergeDotSetStore`, `MergeDotFunStore`, `MergeDotMapStore` + Causal-level `MergeDotSet`, `MergeDotFun`, `MergeDotMap`. All CRDTs wired to use in-place merge. (1000 keys, 1-key delta: 353→216 µs, 921→467 KB, 7804→4776 allocs; 1.6× faster, −49% memory, −39% allocs)
 
+## Network transport
+
+- [x] `transport/` — `Conn` (framed `net.Conn`) + `Transport` (connection pool + `Handler` dispatch). Topology-agnostic, eager push + pull-on-connect, two message types (DeltaBatch + Ack). E2E tested with AWSet replication over localhost TCP.
+
 ## CLI
 
 - [x] `cmd/demo` — scenario demo exercising AWSet, PNCounter, EWFlag, LWWRegister, RGA
