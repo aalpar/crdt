@@ -38,6 +38,17 @@
 - [x] Pre-sized map hints in join results — `newDotSetSized(a.Len()+b.Len())` in `JoinDotSetStore`, `JoinDotFunStore`, and `JoinDotMap`. Eliminates map growth doublings. (1000 disjoint dots: −31% ns, −32% B, −48% allocs; DotFun 1000: −32% ns, −33% B)
 - [x] In-place "merge delta into state" join path — `MergeDotSetStore`, `MergeDotFunStore`, `MergeDotMapStore` + Causal-level `MergeDotSet`, `MergeDotFun`, `MergeDotMap`. All CRDTs wired to use in-place merge. (1000 keys, 1-key delta: 353→216 µs, 921→467 KB, 7804→4776 allocs; 1.6× faster, −49% memory, −39% allocs)
 
+## CLI
+
+- [x] `cmd/demo` — scenario demo exercising AWSet, PNCounter, EWFlag, LWWRegister, RGA
+- [ ] Interactive REPL (`cmd/demo -i` or `cmd/repl`)
+  - [ ] Named replicas: `new awset alice`, `new pncounter bob`
+  - [ ] Operations: `alice add hello`, `bob inc 5`, `carol enable`
+  - [ ] State inspection: `show alice`, `show bob`
+  - [ ] Delta sync: `sync alice bob` (bidirectional delta exchange)
+  - [ ] Partition simulation: `partition alice bob` / `heal alice bob`
+  - [ ] Support all CRDT types: awset, rwset, pncounter, gcounter, lwwregister, ewflag, dwflag, mvregister, rga
+
 ## Infrastructure
 
 - [x] CLAUDE.md
