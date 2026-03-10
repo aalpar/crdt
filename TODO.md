@@ -41,13 +41,8 @@
 ## CLI
 
 - [x] `cmd/demo` — scenario demo exercising AWSet, PNCounter, EWFlag, LWWRegister, RGA
-- [ ] Interactive REPL (`cmd/demo -i` or `cmd/repl`)
-  - [ ] Named replicas: `new awset alice`, `new pncounter bob`
-  - [ ] Operations: `alice add hello`, `bob inc 5`, `carol enable`
-  - [ ] State inspection: `show alice`, `show bob`
-  - [ ] Delta sync: `sync alice bob` (bidirectional delta exchange)
+- [x] Interactive REPL (`cmd/repl`) — all 9 CRDT types, named replicas, delta sync
   - [ ] Partition simulation: `partition alice bob` / `heal alice bob`
-  - [ ] Support all CRDT types: awset, rwset, pncounter, gcounter, lwwregister, ewflag, dwflag, mvregister, rga
 
 ## Infrastructure
 
