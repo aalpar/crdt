@@ -7,7 +7,7 @@ package dotcontext
 // ctxA and ctxB are the causal contexts for dot-survival checks.
 // This is the store-only variant — it does not compute a merged context.
 func JoinDotSetStore(a, b *DotSet, ctxA, ctxB *CausalContext) *DotSet {
-	result := NewDotSet()
+	result := newDotSetSized(a.Len() + b.Len())
 
 	// Dots in a: keep if in b (intersection) or unobserved by b (s₁ \ c₂).
 	a.Range(func(d Dot) bool {
@@ -43,7 +43,7 @@ func JoinDotSet(a, b Causal[*DotSet]) Causal[*DotSet] {
 // hasn't observed it (not in the other's causal context).
 // This is the store-only variant — it does not compute a merged context.
 func JoinDotFunStore[V Lattice[V]](a, b *DotFun[V], ctxA, ctxB *CausalContext) *DotFun[V] {
-	result := NewDotFun[V]()
+	result := newDotFunSized[V](a.Len() + b.Len())
 
 	// Dots in a: keep if also in b (join values) or if not observed by b.
 	a.Range(func(d Dot, va V) bool {
@@ -86,7 +86,7 @@ func JoinDotMap[K comparable, V DotStore](
 	joinV func(V, V, *CausalContext, *CausalContext) V,
 	emptyV func() V,
 ) Causal[*DotMap[K, V]] {
-	result := NewDotMap[K, V]()
+	result := newDotMapSized[K, V](a.Store.Len() + b.Store.Len())
 
 	// Pre-compute a single empty value. Join functions only read their
 	// inputs (Has/Get/Range), so one empty is safe to reuse across all

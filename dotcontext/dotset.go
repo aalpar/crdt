@@ -12,6 +12,11 @@ func NewDotSet() *DotSet {
 	return q
 }
 
+// newDotSetSized returns a DotSet with a pre-sized map.
+func newDotSetSized(n int) *DotSet {
+	return &DotSet{dots: make(map[Dot]struct{}, n)}
+}
+
 // Add inserts a dot into the set.
 func (p *DotSet) Add(d Dot) {
 	p.dots[d] = struct{}{}

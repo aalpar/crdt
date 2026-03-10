@@ -34,7 +34,7 @@
 - [x] `JoinDotMap` allocation reduction — split join functions into store-only variants (`JoinDotSetStore`, `JoinDotFunStore`) that skip per-key context clone/merge/compact. (1000 keys: 16K→12K allocs, 2.0MB→1.7MB, ~20% faster)
 - [x] `Merge()` O(m×n)→O(m+n) — replaced per-element BinarySearch+Insert with sorted-merge pass for outliers. (1000 interleaved outliers: 78µs→3.3µs, 23.5x)
 - [x] Pre-compute single `emptyV()` in `JoinDotMap` — reuse one empty store across all key-misses instead of allocating per-key. (1000 disjoint keys: 16058→12060 allocs, −25%; 1816→1705 KB, −6%; 830→765 µs, −8%)
-- [ ] Pre-sized map hints in join results — `make(map[Dot]struct{}, len(a.dots))` in `JoinDotSetStore` (and similar for `JoinDotFunStore`) when the result size is predictable from the inputs. Eliminates map growth doublings.
+- [x] Pre-sized map hints in join results — `newDotSetSized(a.Len()+b.Len())` in `JoinDotSetStore`, `JoinDotFunStore`, and `JoinDotMap`. Eliminates map growth doublings. (1000 disjoint dots: −31% ns, −32% B, −48% allocs; DotFun 1000: −32% ns, −33% B)
 - [x] In-place "merge delta into state" join path — `MergeDotSetStore`, `MergeDotFunStore`, `MergeDotMapStore` + Causal-level `MergeDotSet`, `MergeDotFun`, `MergeDotMap`. All CRDTs wired to use in-place merge. (1000 keys, 1-key delta: 353→216 µs, 921→467 KB, 7804→4776 allocs; 1.6× faster, −49% memory, −39% allocs)
 
 ## Infrastructure
@@ -58,5 +58,5 @@
 - [x] `DotMap.Clone()` is now deep — added `CloneStore() DotStore` to the `DotStore` interface; `DotMap.Clone()` calls `v.CloneStore().(V)` recursively.
 - [x] `mvregister.Value[V]` naming — renamed to `Entry[V]` with field `Val`, consistent with `CounterValue`, `GValue`, `Presence`, `Timestamped`.
 - [ ] RWSet missing per-package `TestDeltaPropagation` — every other CRDT has one; the shared harness covers it generically but the pattern break is a consistency gap.
-- [ ] CRDT-level fuzz tests beyond AWSet — `awset/fuzz_test.go` found 2 bugs. RWSet (complex `Has` semantics) and ORMap (recursive join + Apply callback) are the highest-value targets.
+- [x] CRDT-level fuzz tests beyond AWSet — `awset/fuzz_test.go` found 2 bugs. Added `rwset/fuzz_test.go` (convergence) and `ormap/fuzz_test.go` (convergence + nested 3-level recursive merge).
 - [ ] `DeltaStore.Fetch` scales linearly — O(|store| × |ranges|) scan. Fine while GC keeps the store small; add a per-replica secondary index if a peer-offline scenario causes buildup.

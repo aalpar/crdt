@@ -12,6 +12,11 @@ func NewDotMap[K comparable, V DotStore]() *DotMap[K, V] {
 	return q
 }
 
+// newDotMapSized returns a DotMap with a pre-sized map.
+func newDotMapSized[K comparable, V DotStore](n int) *DotMap[K, V] {
+	return &DotMap[K, V]{entries: make(map[K]V, n)}
+}
+
 // Set associates a key with a dot store.
 func (p *DotMap[K, V]) Set(k K, v V) {
 	p.entries[k] = v

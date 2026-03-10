@@ -18,6 +18,11 @@ func NewDotFun[V Lattice[V]]() *DotFun[V] {
 	return q
 }
 
+// newDotFunSized returns a DotFun with a pre-sized map.
+func newDotFunSized[V Lattice[V]](n int) *DotFun[V] {
+	return &DotFun[V]{entries: make(map[Dot]V, n)}
+}
+
 // Set associates a value with a dot.
 func (p *DotFun[V]) Set(d Dot, v V) {
 	p.entries[d] = v
