@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"net"
+	"sync"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -174,4 +175,86 @@ func TestConnHelloAfterHandshake(t *testing.T) {
 
 	_, _, err = b.Receive()
 	c.Assert(errors.Is(err, errUnexpectedHello), qt.IsTrue)
+}
+
+func TestConnOversizedSend(t *testing.T) {
+	c := qt.New(t)
+	a, _ := newConnPair(t, "alice", "bob", WithMaxMessageSize(64))
+
+	err := a.SendDeltaBatch(make([]byte, 65))
+	c.Assert(err, qt.IsNotNil)
+	c.Assert(err.Error(), qt.Matches, `.*exceeds max.*`)
+
+	// Connection still works after rejected send.
+	c.Assert(a.SendDeltaBatch([]byte("ok")), qt.IsNil)
+}
+
+func TestConnOversizedReceive(t *testing.T) {
+	c := qt.New(t)
+	// alice has large limit, bob has small limit.
+	// Use newConnPair approach but with asymmetric options.
+	// Since newConnPair applies the same opts to both sides,
+	// we need to create the pair manually.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	c.Assert(err, qt.IsNil)
+	defer ln.Close()
+
+	ch := make(chan *Conn, 1)
+	go func() {
+		raw, _ := ln.Accept()
+		conn, _ := NewConn(raw, "bob", WithMaxMessageSize(32))
+		ch <- conn
+	}()
+	raw, err := net.Dial("tcp", ln.Addr().String())
+	c.Assert(err, qt.IsNil)
+	a, err := NewConn(raw, "alice", WithMaxMessageSize(1024))
+	c.Assert(err, qt.IsNil)
+	b := <-ch
+
+	t.Cleanup(func() { a.Close(); b.Close() })
+
+	// alice sends a payload that exceeds bob's limit.
+	c.Assert(a.SendDeltaBatch(make([]byte, 64)), qt.IsNil)
+	_, _, err = b.Receive()
+	c.Assert(errors.Is(err, errFrameTooLarge), qt.IsTrue)
+}
+
+func TestConnConcurrentSends(t *testing.T) {
+	c := qt.New(t)
+	a, b := newConnPair(t, "alice", "bob")
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		a.SendDeltaBatch([]byte("delta"))
+	}()
+	go func() {
+		defer wg.Done()
+		a.SendAck([]byte("ack"))
+	}()
+	wg.Wait()
+
+	msgs := make(map[MessageType][]byte)
+	for range 2 {
+		typ, payload, err := b.Receive()
+		c.Assert(err, qt.IsNil)
+		msgs[typ] = payload
+	}
+	c.Assert(msgs[MsgDeltaBatch], qt.DeepEquals, []byte("delta"))
+	c.Assert(msgs[MsgAck], qt.DeepEquals, []byte("ack"))
+}
+
+func TestConnCloseDuringReceive(t *testing.T) {
+	c := qt.New(t)
+	a, _ := newConnPair(t, "alice", "bob")
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, _, err := a.Receive()
+		errCh <- err
+	}()
+
+	a.Close()
+	c.Assert(<-errCh, qt.IsNotNil)
 }
