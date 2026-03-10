@@ -602,7 +602,7 @@ func TestE2EORMapAddWinsAcrossWire(t *testing.T) {
 	newMap := func(id string) *ormap.ORMap[string, *dotcontext.DotSet] {
 		return ormap.New[string, *dotcontext.DotSet](
 			dotcontext.ReplicaID(id),
-			dotcontext.JoinDotSetStore,
+			dotcontext.MergeDotSetStore,
 			dotcontext.NewDotSet,
 		)
 	}
@@ -624,7 +624,7 @@ func TestE2EORMapAddWinsAcrossWire(t *testing.T) {
 	c.Assert(codec.Encode(&buf, aliceDelta.State()), qt.IsNil)
 	decoded, err := codec.Decode(&buf)
 	c.Assert(err, qt.IsNil)
-	bob.Merge(ormap.FromCausal(decoded, dotcontext.JoinDotSetStore, dotcontext.NewDotSet))
+	bob.Merge(ormap.FromCausal(decoded, dotcontext.MergeDotSetStore, dotcontext.NewDotSet))
 	c.Assert(alice.Has("x"), qt.IsTrue)
 	c.Assert(bob.Has("x"), qt.IsTrue)
 
@@ -640,11 +640,11 @@ func TestE2EORMapAddWinsAcrossWire(t *testing.T) {
 	// Cross-merge.
 	decodedA, err := codec.Decode(&bufA)
 	c.Assert(err, qt.IsNil)
-	bob.Merge(ormap.FromCausal(decodedA, dotcontext.JoinDotSetStore, dotcontext.NewDotSet))
+	bob.Merge(ormap.FromCausal(decodedA, dotcontext.MergeDotSetStore, dotcontext.NewDotSet))
 
 	decodedB, err := codec.Decode(&bufB)
 	c.Assert(err, qt.IsNil)
-	alice.Merge(ormap.FromCausal(decodedB, dotcontext.JoinDotSetStore, dotcontext.NewDotSet))
+	alice.Merge(ormap.FromCausal(decodedB, dotcontext.MergeDotSetStore, dotcontext.NewDotSet))
 
 	// Add wins: "x" must survive on both replicas.
 	c.Assert(alice.Has("x"), qt.IsTrue, qt.Commentf("add-wins: x must survive"))
@@ -661,7 +661,7 @@ func TestE2EORMapNestedMergeAcrossWire(t *testing.T) {
 	newMap := func(id string) *ormap.ORMap[string, *dotcontext.DotSet] {
 		return ormap.New[string, *dotcontext.DotSet](
 			dotcontext.ReplicaID(id),
-			dotcontext.JoinDotSetStore,
+			dotcontext.MergeDotSetStore,
 			dotcontext.NewDotSet,
 		)
 	}
@@ -689,11 +689,11 @@ func TestE2EORMapNestedMergeAcrossWire(t *testing.T) {
 	// Cross-merge.
 	decodedA, err := codec.Decode(&bufA)
 	c.Assert(err, qt.IsNil)
-	bob.Merge(ormap.FromCausal(decodedA, dotcontext.JoinDotSetStore, dotcontext.NewDotSet))
+	bob.Merge(ormap.FromCausal(decodedA, dotcontext.MergeDotSetStore, dotcontext.NewDotSet))
 
 	decodedB, err := codec.Decode(&bufB)
 	c.Assert(err, qt.IsNil)
-	alice.Merge(ormap.FromCausal(decodedB, dotcontext.JoinDotSetStore, dotcontext.NewDotSet))
+	alice.Merge(ormap.FromCausal(decodedB, dotcontext.MergeDotSetStore, dotcontext.NewDotSet))
 
 	// Both dots survive under key "x" (recursive DotSet join).
 	aliceV, aliceOk := alice.Get("x")

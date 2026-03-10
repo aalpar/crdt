@@ -126,5 +126,5 @@ func FromCausal[V any](state dotcontext.Causal[*dotcontext.DotFun[Timestamped[V]
 
 // Merge incorporates a delta or full state from another register.
 func (p *LWWRegister[V]) Merge(other *LWWRegister[V]) {
-	p.state = dotcontext.JoinDotFun(p.state, other.state)
+	dotcontext.MergeDotFun(&p.state, other.state)
 }

@@ -86,7 +86,7 @@ func FromCausal[V any](state dotcontext.Causal[*dotcontext.DotFun[Entry[V]]]) *M
 
 // Merge incorporates a delta or full state from another register.
 func (r *MVRegister[V]) Merge(other *MVRegister[V]) {
-	r.state = dotcontext.JoinDotFun(r.state, other.state)
+	dotcontext.MergeDotFun(&r.state, other.state)
 }
 
 // Values returns all concurrently-written values. In quiescent state

@@ -248,3 +248,138 @@ func BenchmarkJoinDotMap(b *testing.B) {
 		})
 	}
 }
+
+// --- Merge benchmarks (in-place) ---
+
+func BenchmarkMergeDotSet(b *testing.B) {
+	for _, size := range []int{10, 100, 1000} {
+		b.Run(fmt.Sprintf("dots/%d", size), func(b *testing.B) {
+			a := makeCausalDotSet(1, size)
+			bb := makeCausalDotSet(1, size)
+			for b.Loop() {
+				state := Causal[*DotSet]{Store: a.Store.Clone(), Context: a.Context.Clone()}
+				MergeDotSet(&state, Causal[*DotSet]{Store: bb.Store.Clone(), Context: bb.Context.Clone()})
+			}
+		})
+	}
+}
+
+func BenchmarkMergeDotFun(b *testing.B) {
+	for _, size := range []int{10, 100, 1000} {
+		b.Run(fmt.Sprintf("dots/%d", size), func(b *testing.B) {
+			makeDF := func(id ReplicaID) Causal[*DotFun[maxVal]] {
+				df := NewDotFun[maxVal]()
+				ctx := New()
+				for s := range size {
+					d := Dot{ID: id, Seq: uint64(s + 1)}
+					df.Set(d, maxVal{n: int64(s)})
+					ctx.Add(d)
+				}
+				ctx.Compact()
+				return Causal[*DotFun[maxVal]]{Store: df, Context: ctx}
+			}
+			a := makeDF("a")
+			bb := makeDF("b")
+			for b.Loop() {
+				state := Causal[*DotFun[maxVal]]{Store: a.Store.Clone(), Context: a.Context.Clone()}
+				MergeDotFun(&state, Causal[*DotFun[maxVal]]{Store: bb.Store.Clone(), Context: bb.Context.Clone()})
+			}
+		})
+	}
+}
+
+func BenchmarkMergeDotMap(b *testing.B) {
+	for _, nKeys := range []int{10, 100, 1000} {
+		b.Run(fmt.Sprintf("shared-keys/%d", nKeys), func(b *testing.B) {
+			makeDM := func(id ReplicaID) Causal[*DotMap[string, *DotSet]] {
+				dm := NewDotMap[string, *DotSet]()
+				ctx := New()
+				for k := range nKeys {
+					key := fmt.Sprintf("k%d", k)
+					ds := NewDotSet()
+					d := Dot{ID: id, Seq: uint64(k + 1)}
+					ds.Add(d)
+					dm.Set(key, ds)
+					ctx.Add(d)
+				}
+				ctx.Compact()
+				return Causal[*DotMap[string, *DotSet]]{Store: dm, Context: ctx}
+			}
+			a := makeDM("a")
+			bb := makeDM("b")
+			cloneDM := func(c Causal[*DotMap[string, *DotSet]]) Causal[*DotMap[string, *DotSet]] {
+				return Causal[*DotMap[string, *DotSet]]{Store: c.Store.Clone(), Context: c.Context.Clone()}
+			}
+			for b.Loop() {
+				state := cloneDM(a)
+				MergeDotMap(&state, cloneDM(bb), MergeDotSetStore, NewDotSet)
+			}
+		})
+	}
+}
+
+// BenchmarkMergeDotMapTinyDelta measures the replication hot path:
+// merging a 1-key delta into a large state.
+func BenchmarkMergeDotMapTinyDelta(b *testing.B) {
+	for _, nKeys := range []int{100, 1000} {
+		// In-place merge: only the touched key is processed.
+		b.Run(fmt.Sprintf("merge/%d", nKeys), func(b *testing.B) {
+			makeLargeState := func() Causal[*DotMap[string, *DotSet]] {
+				dm := NewDotMap[string, *DotSet]()
+				ctx := New()
+				for k := range nKeys {
+					key := fmt.Sprintf("k%d", k)
+					ds := NewDotSet()
+					d := Dot{ID: "a", Seq: uint64(k + 1)}
+					ds.Add(d)
+					dm.Set(key, ds)
+					ctx.Add(d)
+				}
+				ctx.Compact()
+				return Causal[*DotMap[string, *DotSet]]{Store: dm, Context: ctx}
+			}
+			delta := Causal[*DotMap[string, *DotSet]]{
+				Store: NewDotMap[string, *DotSet](), Context: New(),
+			}
+			ds := NewDotSet()
+			ds.Add(Dot{ID: "b", Seq: 1})
+			delta.Store.Set("new_key", ds)
+			delta.Context.Add(Dot{ID: "b", Seq: 1})
+
+			for b.Loop() {
+				state := makeLargeState()
+				MergeDotMap(&state, delta, MergeDotSetStore, NewDotSet)
+			}
+		})
+
+		// Allocating join for comparison.
+		b.Run(fmt.Sprintf("join/%d", nKeys), func(b *testing.B) {
+			makeLargeState := func() Causal[*DotMap[string, *DotSet]] {
+				dm := NewDotMap[string, *DotSet]()
+				ctx := New()
+				for k := range nKeys {
+					key := fmt.Sprintf("k%d", k)
+					ds := NewDotSet()
+					d := Dot{ID: "a", Seq: uint64(k + 1)}
+					ds.Add(d)
+					dm.Set(key, ds)
+					ctx.Add(d)
+				}
+				ctx.Compact()
+				return Causal[*DotMap[string, *DotSet]]{Store: dm, Context: ctx}
+			}
+			delta := Causal[*DotMap[string, *DotSet]]{
+				Store: NewDotMap[string, *DotSet](), Context: New(),
+			}
+			ds := NewDotSet()
+			ds.Add(Dot{ID: "b", Seq: 1})
+			delta.Store.Set("new_key", ds)
+			delta.Context.Add(Dot{ID: "b", Seq: 1})
+
+			for b.Loop() {
+				state := makeLargeState()
+				JoinDotMap(state, delta, JoinDotSetStore, NewDotSet)
+			}
+		})
+	}
+}

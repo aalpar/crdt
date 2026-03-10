@@ -10,17 +10,17 @@ import (
 type ORMap[K comparable, V dotcontext.DotStore] struct {
 	id     dotcontext.ReplicaID
 	state  dotcontext.Causal[*dotcontext.DotMap[K, V]]
-	joinV  func(V, V, *dotcontext.CausalContext, *dotcontext.CausalContext) V
+	mergeV func(V, V, *dotcontext.CausalContext, *dotcontext.CausalContext)
 	emptyV func() V
 }
 
 // New creates an empty ORMap for the given replica.
 //
-// joinV is the nested join function for merging values of type V.
+// mergeV is the in-place nested merge for values of type V.
 // emptyV returns a new empty value of type V.
 func New[K comparable, V dotcontext.DotStore](
 	replicaID dotcontext.ReplicaID,
-	joinV func(V, V, *dotcontext.CausalContext, *dotcontext.CausalContext) V,
+	mergeV func(V, V, *dotcontext.CausalContext, *dotcontext.CausalContext),
 	emptyV func() V,
 ) *ORMap[K, V] {
 	q := &ORMap[K, V]{
@@ -29,7 +29,7 @@ func New[K comparable, V dotcontext.DotStore](
 			Store:   dotcontext.NewDotMap[K, V](),
 			Context: dotcontext.New(),
 		},
-		joinV:  joinV,
+		mergeV: mergeV,
 		emptyV: emptyV,
 	}
 	return q
@@ -84,7 +84,7 @@ func (p *ORMap[K, V]) Apply(key K, fn func(id dotcontext.ReplicaID, ctx *dotcont
 	deltaStore.Set(key, deltaV)
 
 	return &ORMap[K, V]{
-		joinV:  p.joinV,
+		mergeV: p.mergeV,
 		emptyV: p.emptyV,
 		state: dotcontext.Causal[*dotcontext.DotMap[K, V]]{
 			Store:   deltaStore,
@@ -110,7 +110,7 @@ func (p *ORMap[K, V]) Remove(key K) *ORMap[K, V] {
 	}
 
 	return &ORMap[K, V]{
-		joinV:  p.joinV,
+		mergeV: p.mergeV,
 		emptyV: p.emptyV,
 		state: dotcontext.Causal[*dotcontext.DotMap[K, V]]{
 			Store:   dotcontext.NewDotMap[K, V](),
@@ -156,17 +156,17 @@ func (p *ORMap[K, V]) State() dotcontext.Causal[*dotcontext.DotMap[K, V]] {
 // Used to reconstruct deltas from the wire for merging.
 func FromCausal[K comparable, V dotcontext.DotStore](
 	state dotcontext.Causal[*dotcontext.DotMap[K, V]],
-	joinV func(V, V, *dotcontext.CausalContext, *dotcontext.CausalContext) V,
+	mergeV func(V, V, *dotcontext.CausalContext, *dotcontext.CausalContext),
 	emptyV func() V,
 ) *ORMap[K, V] {
 	return &ORMap[K, V]{
 		state:  state,
-		joinV:  joinV,
+		mergeV: mergeV,
 		emptyV: emptyV,
 	}
 }
 
 // Merge incorporates a delta or full state from another ORMap.
 func (p *ORMap[K, V]) Merge(other *ORMap[K, V]) {
-	p.state = dotcontext.JoinDotMap(p.state, other.state, p.joinV, p.emptyV)
+	dotcontext.MergeDotMap(&p.state, other.state, p.mergeV, p.emptyV)
 }

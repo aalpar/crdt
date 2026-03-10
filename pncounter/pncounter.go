@@ -112,5 +112,5 @@ func FromCausal(state dotcontext.Causal[*dotcontext.DotFun[CounterValue]]) *Coun
 
 // Merge incorporates a delta or full state from another counter.
 func (p *Counter) Merge(other *Counter) {
-	p.state = dotcontext.JoinDotFun(p.state, other.state)
+	dotcontext.MergeDotFun(&p.state, other.state)
 }

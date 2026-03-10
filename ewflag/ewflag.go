@@ -82,5 +82,5 @@ func FromCausal(state dotcontext.Causal[*dotcontext.DotSet]) *EWFlag {
 
 // Merge incorporates a delta or full state from another EWFlag.
 func (p *EWFlag) Merge(other *EWFlag) {
-	p.state = dotcontext.JoinDotSet(p.state, other.state)
+	dotcontext.MergeDotSet(&p.state, other.state)
 }

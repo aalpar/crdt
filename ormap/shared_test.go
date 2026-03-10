@@ -12,7 +12,7 @@ func TestSharedProperties(t *testing.T) {
 	newSetMap := func(id string) *ORMap[string, *dotcontext.DotSet] {
 		return New[string, *dotcontext.DotSet](
 			dotcontext.ReplicaID(id),
-			dotcontext.JoinDotSetStore,
+			dotcontext.MergeDotSetStore,
 			dotcontext.NewDotSet,
 		)
 	}

@@ -34,6 +34,16 @@ Join functions merge two `Causal` values (idempotent, commutative, associative):
 
 Each join has a store-only variant (`JoinDotSetStore`, `JoinDotFunStore`) that applies the dot formula without cloning/merging contexts. `JoinDotMap`'s `joinV` callback uses the store-only signature `func(V, V, *CausalContext, *CausalContext) V` — the context merge happens once at the DotMap level.
 
+In-place merge functions mutate the state side instead of allocating a new result:
+
+| Function | In-place equivalent |
+|----------|-------------------|
+| `JoinDotSet` | `MergeDotSet` — mutates `*Causal[*DotSet]` |
+| `JoinDotFun` | `MergeDotFun` — mutates `*Causal[*DotFun[V]]` |
+| `JoinDotMap` | `MergeDotMap` — mutates `*Causal[*DotMap[K,V]]` |
+
+Each has a store-only variant (`MergeDotSetStore`, `MergeDotFunStore`, `MergeDotMapStore`). `MergeDotMap`'s `mergeV` callback uses the in-place signature `func(V, V, *CausalContext, *CausalContext)` (no return). All CRDT `Merge` methods use the in-place path. The allocating `Join` functions remain for tests and symmetric merge scenarios.
+
 ### Layer 2: Higher-Level CRDTs
 
 Each composes dotcontext types. Mutators return deltas for replication.
@@ -53,7 +63,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 ### Key Design Decisions
 
 - Mutators generate dots from the main `CausalContext` and mutate local state directly — no self-merge (avoids false "observed and removed" interpretation)
-- `JoinDotMap` takes `joinV` (store-only callback) and `emptyV func() V` parameters (not type switches) so it works with arbitrary `DotStore` types
+- `JoinDotMap` takes `joinV` (store-only allocating callback) and `emptyV func() V` parameters (not type switches) so it works with arbitrary `DotStore` types. `MergeDotMap` takes `mergeV` (in-place callback) instead
 - `CausalContext` outliers are `map[ReplicaID][]uint64` (per-replica sorted slices), not `map[Dot]struct{}`
 - `math/big` is not used here (that's the shamir project); this project uses stdlib maps throughout
 - `Compact()` removes outliers at or below the version vector frontier, not just contiguous ones
@@ -68,7 +78,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 
 | Package | Key Types | Files |
 |---------|-----------|-------|
-| `dotcontext/` | Dot, CausalContext, DotSet, DotFun, DotMap, Causal, DecodeLimitError | 11 source + 10 test |
+| `dotcontext/` | Dot, CausalContext, DotSet, DotFun, DotMap, Causal, DecodeLimitError | 12 source + 12 test |
 | `crdttest/` | Harness[T] | 1 source (test-only shared property tests) |
 | `awset/` | AWSet | 2 source + 3 test |
 | `rwset/` | RWSet, Presence | 2 source + 2 test |

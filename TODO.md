@@ -7,6 +7,9 @@
 - [x] `JoinDotSet` — three-term set formula
 - [x] `JoinDotFun`, `JoinDotMap` — lattice join, recursive join with callback
 - [x] `CausalContext.ReplicaIDs` accessor
+- [x] `CausalContext.Missing()` — anti-entropy primitive (design: `docs/plans/MISSING-DESIGN.md`)
+- [x] `SeqRange` type, `MissingCodec`, fuzz round-trip
+- [x] `DeltaStore.Fetch()` composable with `Missing()` return type
 
 661 tests passing across all packages (includes semilattice property checks, fuzz seed corpus).
 
@@ -32,7 +35,7 @@
 - [x] `Merge()` O(m×n)→O(m+n) — replaced per-element BinarySearch+Insert with sorted-merge pass for outliers. (1000 interleaved outliers: 78µs→3.3µs, 23.5x)
 - [x] Pre-compute single `emptyV()` in `JoinDotMap` — reuse one empty store across all key-misses instead of allocating per-key. (1000 disjoint keys: 16058→12060 allocs, −25%; 1816→1705 KB, −6%; 830→765 µs, −8%)
 - [ ] Pre-sized map hints in join results — `make(map[Dot]struct{}, len(a.dots))` in `JoinDotSetStore` (and similar for `JoinDotFunStore`) when the result size is predictable from the inputs. Eliminates map growth doublings.
-- [ ] In-place "merge delta into state" join path — destructive variant that mutates the large side instead of allocating a new result. The common replication case (small delta into large state) would skip the dominant allocation entirely.
+- [x] In-place "merge delta into state" join path — `MergeDotSetStore`, `MergeDotFunStore`, `MergeDotMapStore` + Causal-level `MergeDotSet`, `MergeDotFun`, `MergeDotMap`. All CRDTs wired to use in-place merge. (1000 keys, 1-key delta: 353→216 µs, 921→467 KB, 7804→4776 allocs; 1.6× faster, −49% memory, −39% allocs)
 
 ## Infrastructure
 
