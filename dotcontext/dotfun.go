@@ -62,6 +62,9 @@ func (p *DotFun[V]) Dots() *DotSet {
 	return ds
 }
 
+// CloneStore returns a copy as a DotStore (interface implementation).
+func (p *DotFun[V]) CloneStore() DotStore { return p.Clone() }
+
 // Clone copies the map entries by value. For value-typed V this is a
 // deep copy; for pointer-typed V the values are shared.
 func (p *DotFun[V]) Clone() *DotFun[V] {

@@ -136,15 +136,33 @@ func TestDotMapDots(t *testing.T) {
 
 func TestDotMapClone(t *testing.T) {
 	c := qt.New(t)
-	m := NewDotMap[string, *DotSet]()
-	s := NewDotSet()
-	s.Add(Dot{ID: "a", Seq: 1})
-	m.Set("k1", s)
 
-	cl := m.Clone()
-	cl.Set("k2", NewDotSet())
+	c.Run("NewKeyDoesNotAffectOriginal", func(c *qt.C) {
+		m := NewDotMap[string, *DotSet]()
+		s := NewDotSet()
+		s.Add(Dot{ID: "a", Seq: 1})
+		m.Set("k1", s)
 
-	c.Assert(m.Len(), qt.Equals, 1)
-	_, ok := m.Get("k2")
-	c.Assert(ok, qt.IsFalse)
+		cl := m.Clone()
+		cl.Set("k2", NewDotSet())
+
+		c.Assert(m.Len(), qt.Equals, 1)
+		_, ok := m.Get("k2")
+		c.Assert(ok, qt.IsFalse)
+	})
+
+	c.Run("MutatingClonedValueDoesNotAffectOriginal", func(c *qt.C) {
+		m := NewDotMap[string, *DotSet]()
+		s := NewDotSet()
+		s.Add(Dot{ID: "a", Seq: 1})
+		m.Set("k1", s)
+
+		cl := m.Clone()
+		clVal, _ := cl.Get("k1")
+		clVal.Add(Dot{ID: "b", Seq: 2})
+
+		origVal, _ := m.Get("k1")
+		c.Assert(origVal.Len(), qt.Equals, 1)
+		c.Assert(origVal.Has(Dot{ID: "b", Seq: 2}), qt.IsFalse)
+	})
 }

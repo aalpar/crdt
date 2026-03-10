@@ -194,7 +194,7 @@ func BenchmarkJoinDotFun(b *testing.B) {
 
 func BenchmarkJoinDotMap(b *testing.B) {
 	for _, nKeys := range []int{10, 100, 1000} {
-		b.Run(fmt.Sprintf("keys/%d", nKeys), func(b *testing.B) {
+		b.Run(fmt.Sprintf("shared-keys/%d", nKeys), func(b *testing.B) {
 			makeDM := func(id ReplicaID) Causal[*DotMap[string, *DotSet]] {
 				dm := NewDotMap[string, *DotSet]()
 				ctx := New()
@@ -212,12 +212,35 @@ func BenchmarkJoinDotMap(b *testing.B) {
 			a := makeDM("a")
 			bb := makeDM("b")
 			cloneDM := func(c Causal[*DotMap[string, *DotSet]]) Causal[*DotMap[string, *DotSet]] {
-				store := NewDotMap[string, *DotSet]()
-				c.Store.Range(func(k string, v *DotSet) bool {
-					store.Set(k, v.Clone())
-					return true
-				})
-				return Causal[*DotMap[string, *DotSet]]{Store: store, Context: c.Context.Clone()}
+				return Causal[*DotMap[string, *DotSet]]{Store: c.Store.Clone(), Context: c.Context.Clone()}
+			}
+			for b.Loop() {
+				JoinDotMap(cloneDM(a), cloneDM(bb), JoinDotSetStore, NewDotSet)
+			}
+		})
+	}
+
+	// Disjoint keys: every key exists on only one side, exercising the emptyV path.
+	for _, nKeys := range []int{10, 100, 1000} {
+		b.Run(fmt.Sprintf("disjoint-keys/%d", nKeys), func(b *testing.B) {
+			makeDM := func(id ReplicaID, prefix string) Causal[*DotMap[string, *DotSet]] {
+				dm := NewDotMap[string, *DotSet]()
+				ctx := New()
+				for k := range nKeys {
+					key := fmt.Sprintf("%s%d", prefix, k)
+					ds := NewDotSet()
+					d := Dot{ID: id, Seq: uint64(k + 1)}
+					ds.Add(d)
+					dm.Set(key, ds)
+					ctx.Add(d)
+				}
+				ctx.Compact()
+				return Causal[*DotMap[string, *DotSet]]{Store: dm, Context: ctx}
+			}
+			a := makeDM("a", "a")
+			bb := makeDM("b", "b")
+			cloneDM := func(c Causal[*DotMap[string, *DotSet]]) Causal[*DotMap[string, *DotSet]] {
+				return Causal[*DotMap[string, *DotSet]]{Store: c.Store.Clone(), Context: c.Context.Clone()}
 			}
 			for b.Loop() {
 				JoinDotMap(cloneDM(a), cloneDM(bb), JoinDotSetStore, NewDotSet)

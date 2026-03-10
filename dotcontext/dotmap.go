@@ -51,12 +51,14 @@ func (p *DotMap[K, V]) Keys() []K {
 	return keys
 }
 
-// Clone returns a shallow copy of the DotMap. Keys are copied but nested
-// DotStore values are shared.
+// CloneStore returns a deep copy as a DotStore (interface implementation).
+func (p *DotMap[K, V]) CloneStore() DotStore { return p.Clone() }
+
+// Clone returns a deep copy — each nested DotStore value is cloned recursively.
 func (p *DotMap[K, V]) Clone() *DotMap[K, V] {
 	dm := &DotMap[K, V]{entries: make(map[K]V, len(p.entries))}
 	for k, v := range p.entries {
-		dm.entries[k] = v
+		dm.entries[k] = v.CloneStore().(V)
 	}
 	return dm
 }

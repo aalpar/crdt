@@ -99,12 +99,7 @@ func cloneCausalDotFun(c Causal[*DotFun[maxVal]]) Causal[*DotFun[maxVal]] {
 }
 
 func cloneCausalDotMap(c Causal[*DotMap[string, *DotSet]]) Causal[*DotMap[string, *DotSet]] {
-	store := NewDotMap[string, *DotSet]()
-	c.Store.Range(func(k string, v *DotSet) bool {
-		store.Set(k, v.Clone())
-		return true
-	})
-	return Causal[*DotMap[string, *DotSet]]{Store: store, Context: c.Context.Clone()}
+	return Causal[*DotMap[string, *DotSet]]{Store: c.Store.Clone(), Context: c.Context.Clone()}
 }
 
 // --- Equality helpers ---

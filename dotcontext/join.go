@@ -88,6 +88,11 @@ func JoinDotMap[K comparable, V DotStore](
 ) Causal[*DotMap[K, V]] {
 	result := NewDotMap[K, V]()
 
+	// Pre-compute a single empty value. Join functions only read their
+	// inputs (Has/Get/Range), so one empty is safe to reuse across all
+	// key-misses — eliminates ~1 alloc per key that exists on only one side.
+	empty := emptyV()
+
 	// Keys in a.
 	a.Store.Range(func(k K, va V) bool {
 		if vb, ok := b.Store.Get(k); ok {
@@ -98,7 +103,7 @@ func JoinDotMap[K comparable, V DotStore](
 			}
 		} else {
 			// Key only in a: join with empty (b's context still applies).
-			joined := joinV(va, emptyV(), a.Context, b.Context)
+			joined := joinV(va, empty, a.Context, b.Context)
 			if joined.HasDots() {
 				result.Set(k, joined)
 			}
@@ -111,7 +116,7 @@ func JoinDotMap[K comparable, V DotStore](
 		if _, ok := a.Store.Get(k); ok {
 			return true // already handled above
 		}
-		joined := joinV(emptyV(), vb, a.Context, b.Context)
+		joined := joinV(empty, vb, a.Context, b.Context)
 		if joined.HasDots() {
 			result.Set(k, joined)
 		}

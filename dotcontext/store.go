@@ -5,4 +5,5 @@ package dotcontext
 type DotStore interface {
 	Dots() *DotSet
 	HasDots() bool
+	CloneStore() DotStore
 }

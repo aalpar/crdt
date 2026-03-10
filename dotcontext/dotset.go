@@ -53,6 +53,9 @@ func (p *DotSet) HasDots() bool {
 	return len(p.dots) > 0
 }
 
+// CloneStore returns a deep copy as a DotStore (interface implementation).
+func (p *DotSet) CloneStore() DotStore { return p.Clone() }
+
 // Clone returns a deep copy.
 func (p *DotSet) Clone() *DotSet {
 	ds := &DotSet{dots: make(map[Dot]struct{}, len(p.dots))}
