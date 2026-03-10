@@ -1,0 +1,58 @@
+name: Fuzz
+
+on:
+  schedule:
+    - cron: '0 4 * * 1' # Weekly, Monday 4am UTC
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: 'Time budget per fuzz target'
+        default: '2m'
+        type: string
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    env:
+      FUZZTIME_INPUT: ${{ inputs.fuzztime }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Restore fuzz corpus cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build/fuzz
+          key: fuzz-${{ runner.os }}-${{ hashFiles('**/*fuzz*test.go') }}-${{ github.run_number }}
+          restore-keys: |
+            fuzz-${{ runner.os }}-${{ hashFiles('**/*fuzz*test.go') }}-
+            fuzz-${{ runner.os }}-
+
+      - name: Run fuzz targets
+        run: |
+          FUZZTIME="${FUZZTIME_INPUT:-2m}"
+          TARGETS=(
+            "./dotcontext/ FuzzJoinDotSetSemilattice"
+            "./dotcontext/ FuzzJoinDotFunSemilattice"
+            "./dotcontext/ FuzzJoinDotMapSemilattice"
+            "./dotcontext/ FuzzCodecRoundTripDotSet"
+            "./dotcontext/ FuzzCodecRoundTripDotFun"
+            "./dotcontext/ FuzzCodecRoundTripDotMap"
+            "./awset/ FuzzAWSetConvergence"
+            "./rwset/ FuzzRWSetConvergence"
+            "./ormap/ FuzzORMapConvergence"
+            "./ormap/ FuzzORMapNestedConvergence"
+          )
+          FAILED=0
+          for entry in "${TARGETS[@]}"; do
+            read -r pkg func <<< "$entry"
+            echo "::group::${pkg} ${func} (${FUZZTIME})"
+            if ! go test -fuzz="^${func}$" -fuzztime="${FUZZTIME}" "${pkg}"; then
+              FAILED=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $FAILED

@@ -40,9 +40,27 @@ profile:
 	@echo "  go tool pprof -http=:8080 $(PROF_DIR)/cpu.prof"
 	@echo "  go tool pprof -http=:8080 $(PROF_DIR)/mem.prof"
 
+FUZZ_TARGETS = \
+	./dotcontext/:FuzzJoinDotSetSemilattice \
+	./dotcontext/:FuzzJoinDotFunSemilattice \
+	./dotcontext/:FuzzJoinDotMapSemilattice \
+	./dotcontext/:FuzzCodecRoundTripDotSet \
+	./dotcontext/:FuzzCodecRoundTripDotFun \
+	./dotcontext/:FuzzCodecRoundTripDotMap \
+	./awset/:FuzzAWSetConvergence \
+	./rwset/:FuzzRWSetConvergence \
+	./ormap/:FuzzORMapConvergence \
+	./ormap/:FuzzORMapNestedConvergence
+
+FUZZTIME ?= 30s
+
 .PHONY: fuzz
 fuzz:
-	$(GO) test $(GOFLAGS) -fuzz=. -fuzztime=30s $(PACKAGES)
+	@for target in $(FUZZ_TARGETS); do \
+		pkg=$${target%%:*}; func=$${target##*:}; \
+		echo "=== $${pkg} $${func} ($(FUZZTIME)) ==="; \
+		$(GO) test $(GOFLAGS) -fuzz="^$${func}$$" -fuzztime=$(FUZZTIME) "$${pkg}" || exit 1; \
+	done
 
 .PHONY: lint
 lint:

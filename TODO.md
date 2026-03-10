@@ -52,7 +52,7 @@
 - [x] Benchmarks for CausalContext operations at scale
 - [x] Makefile with build, test, bench, fuzz, lint, release targets
 - [x] README.md with usage examples
-- [ ] CI: run fuzz with `-fuzztime` budget on schedule (not per-push)
+- [x] CI: scheduled fuzz (`fuzz.yml`) — weekly, 2min/target, corpus cached across runs. Also fixed `make fuzz` to enumerate targets individually (`-fuzz` rejects multi-package and multi-match).
 - [x] `go doc` comments on all exported types and functions
 - [x] `crdttest/` — shared property test harness (`Harness[T]`), eliminates ~1,700 lines of duplicated test structure across 9 CRDT packages
 - [x] Typed decode errors (`*DecodeLimitError`) — replaces `fmt.Errorf` in codec, enables `errors.As` for callers
