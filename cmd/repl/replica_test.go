@@ -413,7 +413,11 @@ func assertShow(t *testing.T, r Replica, want string) {
 func resetReplicas(t *testing.T) {
 	t.Helper()
 	replicas = map[string]Replica{}
-	t.Cleanup(func() { replicas = map[string]Replica{} })
+	partitioned = map[[2]string]bool{}
+	t.Cleanup(func() {
+		replicas = map[string]Replica{}
+		partitioned = map[[2]string]bool{}
+	})
 }
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -501,6 +505,147 @@ func TestDoSync_TypeMismatch(t *testing.T) {
 	out := captureStdout(t, func() { doSync([]string{"alice", "bob"}) })
 	if !strings.Contains(out, "type mismatch") {
 		t.Errorf("doSync type mismatch output = %q, want 'type mismatch'", out)
+	}
+}
+
+// --- Partition tests ---
+
+func TestPartitionKey_Canonical(t *testing.T) {
+	if partitionKey("alice", "bob") != partitionKey("bob", "alice") {
+		t.Error("partitionKey should be order-independent")
+	}
+}
+
+func TestPartition_BlocksSync(t *testing.T) {
+	resetReplicas(t)
+
+	captureStdout(t, func() {
+		doNew([]string{"awset", "alice"})
+		doNew([]string{"awset", "bob"})
+		doOp("alice", []string{"add", "x"})
+		doPartition([]string{"alice", "bob"})
+	})
+
+	out := captureStdout(t, func() { doSync([]string{"alice", "bob"}) })
+	if !strings.Contains(out, "partitioned") {
+		t.Errorf("sync during partition: %q, want 'partitioned'", out)
+	}
+
+	// Bob should not have alice's element.
+	assertShow(t, replicas["bob"], "{}")
+}
+
+func TestHeal_RestoresSync(t *testing.T) {
+	resetReplicas(t)
+
+	captureStdout(t, func() {
+		doNew([]string{"awset", "alice"})
+		doNew([]string{"awset", "bob"})
+		doOp("alice", []string{"add", "x"})
+		doPartition([]string{"alice", "bob"})
+	})
+
+	// Sync blocked.
+	captureStdout(t, func() { doSync([]string{"alice", "bob"}) })
+	assertShow(t, replicas["bob"], "{}")
+
+	// Heal and sync succeeds.
+	captureStdout(t, func() {
+		doHeal([]string{"alice", "bob"})
+		doSync([]string{"alice", "bob"})
+	})
+	assertShow(t, replicas["bob"], "{x}")
+}
+
+func TestPartition_ConcurrentOps(t *testing.T) {
+	resetReplicas(t)
+
+	captureStdout(t, func() {
+		doNew([]string{"awset", "alice"})
+		doNew([]string{"awset", "bob"})
+
+		// Both observe "shared".
+		doOp("alice", []string{"add", "shared"})
+		doSync([]string{"alice", "bob"})
+
+		// Partition.
+		doPartition([]string{"alice", "bob"})
+
+		// Concurrent ops during partition.
+		doOp("alice", []string{"add", "only-alice"})
+		doOp("bob", []string{"add", "only-bob"})
+
+		// Heal and sync.
+		doHeal([]string{"alice", "bob"})
+		doSync([]string{"alice", "bob"})
+	})
+
+	assertShow(t, replicas["alice"], "{only-alice, only-bob, shared}")
+	assertShow(t, replicas["bob"], "{only-alice, only-bob, shared}")
+}
+
+func TestPartition_AlreadyPartitioned(t *testing.T) {
+	resetReplicas(t)
+
+	captureStdout(t, func() { doPartition([]string{"alice", "bob"}) })
+	out := captureStdout(t, func() { doPartition([]string{"alice", "bob"}) })
+	if !strings.Contains(out, "already partitioned") {
+		t.Errorf("double partition: %q, want 'already partitioned'", out)
+	}
+}
+
+func TestHeal_NotPartitioned(t *testing.T) {
+	resetReplicas(t)
+
+	out := captureStdout(t, func() { doHeal([]string{"alice", "bob"}) })
+	if !strings.Contains(out, "not partitioned") {
+		t.Errorf("heal without partition: %q, want 'not partitioned'", out)
+	}
+}
+
+func TestPartition_Self(t *testing.T) {
+	resetReplicas(t)
+
+	out := captureStdout(t, func() { doPartition([]string{"alice", "alice"}) })
+	if !strings.Contains(out, "cannot partition a replica from itself") {
+		t.Errorf("self-partition: %q, want error", out)
+	}
+}
+
+func TestPartition_MissingArgs(t *testing.T) {
+	resetReplicas(t)
+
+	out := captureStdout(t, func() { doPartition(nil) })
+	if !strings.Contains(out, "usage") {
+		t.Errorf("partition missing args: %q, want 'usage'", out)
+	}
+}
+
+func TestHeal_MissingArgs(t *testing.T) {
+	resetReplicas(t)
+
+	out := captureStdout(t, func() { doHeal(nil) })
+	if !strings.Contains(out, "usage") {
+		t.Errorf("heal missing args: %q, want 'usage'", out)
+	}
+}
+
+func TestDoPartitions_Empty(t *testing.T) {
+	resetReplicas(t)
+
+	out := captureStdout(t, func() { doPartitions() })
+	if !strings.Contains(out, "no partitions") {
+		t.Errorf("empty partitions: %q, want 'no partitions'", out)
+	}
+}
+
+func TestDoPartitions_ShowsActive(t *testing.T) {
+	resetReplicas(t)
+
+	captureStdout(t, func() { doPartition([]string{"alice", "bob"}) })
+	out := captureStdout(t, func() { doPartitions() })
+	if !strings.Contains(out, "alice") || !strings.Contains(out, "bob") {
+		t.Errorf("partitions list: %q, want alice and bob", out)
 	}
 }
 

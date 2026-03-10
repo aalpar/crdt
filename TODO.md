@@ -42,7 +42,7 @@
 
 - [x] `cmd/demo` — scenario demo exercising AWSet, PNCounter, EWFlag, LWWRegister, RGA
 - [x] Interactive REPL (`cmd/repl`) — all 9 CRDT types, named replicas, delta sync
-  - [ ] Partition simulation: `partition alice bob` / `heal alice bob`
+  - [x] Partition simulation: `partition alice bob` / `heal alice bob`
 
 ## Infrastructure
 

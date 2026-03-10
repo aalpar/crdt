@@ -7,7 +7,18 @@ import (
 	"strings"
 )
 
-var replicas = map[string]Replica{}
+var (
+	replicas    = map[string]Replica{}
+	partitioned = map[[2]string]bool{}
+)
+
+// partitionKey returns a canonical (sorted) key for an unordered pair.
+func partitionKey(a, b string) [2]string {
+	if a > b {
+		a, b = b, a
+	}
+	return [2]string{a, b}
+}
 
 func main() {
 	fmt.Println("CRDT REPL — type 'help' for commands")
@@ -39,6 +50,12 @@ func main() {
 			doShow(args)
 		case "sync":
 			doSync(args)
+		case "partition":
+			doPartition(args)
+		case "heal":
+			doHeal(args)
+		case "partitions":
+			doPartitions()
 		case "replicas":
 			doList()
 		default:
@@ -100,11 +117,59 @@ func doSync(args []string) {
 		fmt.Printf("error: unknown replica %q\n", args[1])
 		return
 	}
+	if partitioned[partitionKey(args[0], args[1])] {
+		fmt.Printf("error: %s and %s are partitioned\n", args[0], args[1])
+		return
+	}
 	if err := r1.Sync(r2); err != nil {
 		fmt.Printf("error: %v\n", err)
 		return
 	}
 	fmt.Printf("synced %s <-> %s\n", args[0], args[1])
+}
+
+func doPartition(args []string) {
+	if len(args) < 2 {
+		fmt.Println("usage: partition <name1> <name2>")
+		return
+	}
+	a, b := args[0], args[1]
+	if a == b {
+		fmt.Println("error: cannot partition a replica from itself")
+		return
+	}
+	key := partitionKey(a, b)
+	if partitioned[key] {
+		fmt.Printf("%s and %s are already partitioned\n", a, b)
+		return
+	}
+	partitioned[key] = true
+	fmt.Printf("partitioned %s <-> %s\n", a, b)
+}
+
+func doHeal(args []string) {
+	if len(args) < 2 {
+		fmt.Println("usage: heal <name1> <name2>")
+		return
+	}
+	a, b := args[0], args[1]
+	key := partitionKey(a, b)
+	if !partitioned[key] {
+		fmt.Printf("%s and %s are not partitioned\n", a, b)
+		return
+	}
+	delete(partitioned, key)
+	fmt.Printf("healed %s <-> %s\n", a, b)
+}
+
+func doPartitions() {
+	if len(partitioned) == 0 {
+		fmt.Println("no partitions")
+		return
+	}
+	for pair := range partitioned {
+		fmt.Printf("  %s <-> %s\n", pair[0], pair[1])
+	}
 }
 
 func doList() {
@@ -141,6 +206,9 @@ func printHelp() {
   <name> <op> [args...]   Execute an operation on a replica
   show <name>             Display replica state
   sync <name1> <name2>    Bidirectional delta exchange
+  partition <n1> <n2>     Block sync between two replicas
+  heal <n1> <n2>          Restore sync between two replicas
+  partitions              List active partitions
   replicas                List all replicas
   help                    Show this help
   exit                    Quit
@@ -160,11 +228,13 @@ Example session:
   new awset alice
   new awset bob
   alice add hello
-  alice add world
-  show alice          → {hello, world}
   bob add world
-  bob remove hello
+  partition alice bob
+  alice add x          (concurrent with bob, during partition)
+  bob add y
+  sync alice bob       → error: partitioned
+  heal alice bob
   sync alice bob
-  show alice          → {hello, world}
-  show bob            → {hello, world}`)
+  show alice           → {hello, world, x, y}
+  show bob             → {hello, world, x, y}`)
 }
