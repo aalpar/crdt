@@ -549,6 +549,227 @@ func TestPurgeTombstones(t *testing.T) {
 	})
 }
 
+func TestCompactPhantoms(t *testing.T) {
+	c := qt.New(t)
+
+	alwaysGC := func(dotcontext.Dot) bool { return true }
+
+	c.Run("EmptyGcAfter", func(c *qt.C) {
+		r := New[string]("a")
+		c.Assert(r.CompactPhantoms(), qt.Equals, 0)
+	})
+
+	c.Run("LeafPhantomRemoved", func(c *qt.C) {
+		// a → b → c. Delete c, GC c. Phantom c is a leaf
+		// (nothing has After = c's dot). CompactPhantoms removes it.
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+		r.InsertAt(2, "c")
+
+		r.DeleteAt(2)
+		r.PurgeTombstones(alwaysGC)
+		c.Assert(r.PhantomCount(), qt.Equals, 1)
+
+		n := r.CompactPhantoms()
+		c.Assert(n, qt.Equals, 1)
+		c.Assert(r.PhantomCount(), qt.Equals, 0)
+
+		// Order still correct.
+		c.Assert(values(r.Elements()), qt.DeepEquals, []string{"a", "b"})
+	})
+
+	c.Run("ReferencedPhantomKept", func(c *qt.C) {
+		// a → b → c. Delete b, GC b. Phantom b is referenced
+		// by c (c.After = b's dot). Must not be compacted.
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+		r.InsertAt(2, "c")
+
+		r.DeleteAt(1)
+		r.PurgeTombstones(alwaysGC)
+		c.Assert(r.PhantomCount(), qt.Equals, 1)
+
+		n := r.CompactPhantoms()
+		c.Assert(n, qt.Equals, 0) // b still referenced by c
+		c.Assert(r.PhantomCount(), qt.Equals, 1)
+
+		c.Assert(values(r.Elements()), qt.DeepEquals, []string{"a", "c"})
+	})
+
+	c.Run("CascadeRemoval", func(c *qt.C) {
+		// Chain: a → b → c → d → e. Delete b, c, d. GC all three.
+		// Phantoms: b(→a), c(→b), d(→c).
+		// e has After = d → d is referenced.
+		// c is referenced by d. b is referenced by c.
+		// None compactable yet.
+		//
+		// Now delete e, GC e. Phantom e(→d).
+		// d is referenced by phantom e. c by d. b by c. e is unreferenced.
+		// CompactPhantoms removes e → d unreferenced → c unreferenced → b unreferenced.
+		// All 4 phantoms removed in one call.
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+		r.InsertAt(2, "c")
+		r.InsertAt(3, "d")
+		r.InsertAt(4, "e")
+
+		r.DeleteAt(1) // b
+		r.DeleteAt(1) // c (shifted)
+		r.DeleteAt(1) // d (shifted)
+		r.PurgeTombstones(alwaysGC)
+		c.Assert(r.PhantomCount(), qt.Equals, 3)
+
+		// e still references d, so no compaction yet.
+		c.Assert(r.CompactPhantoms(), qt.Equals, 0)
+
+		// Delete and GC e.
+		r.DeleteAt(1) // e (shifted after a)
+		r.PurgeTombstones(alwaysGC)
+		c.Assert(r.PhantomCount(), qt.Equals, 4)
+
+		// Now all 4 phantoms cascade: e unreferenced → removes e →
+		// d unreferenced → removes d → c unreferenced → removes c →
+		// b unreferenced → removes b.
+		n := r.CompactPhantoms()
+		c.Assert(n, qt.Equals, 4)
+		c.Assert(r.PhantomCount(), qt.Equals, 0)
+
+		c.Assert(values(r.Elements()), qt.DeepEquals, []string{"a"})
+	})
+
+	c.Run("MixedReferencedAndUnreferenced", func(c *qt.C) {
+		// a → b → c → d. Delete b and d. GC both.
+		// Phantom b(→a): referenced by c (c.After = b). KEEP.
+		// Phantom d(→c): unreferenced (nothing has After = d). REMOVE.
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+		r.InsertAt(2, "c")
+		r.InsertAt(3, "d")
+
+		bDot := r.Elements()[1].ID
+		dDot := r.Elements()[3].ID
+		r.Delete(bDot)
+		r.Delete(dDot)
+		r.PurgeTombstones(alwaysGC)
+		c.Assert(r.PhantomCount(), qt.Equals, 2)
+
+		n := r.CompactPhantoms()
+		c.Assert(n, qt.Equals, 1) // only d removed
+		c.Assert(r.PhantomCount(), qt.Equals, 1)
+
+		c.Assert(values(r.Elements()), qt.DeepEquals, []string{"a", "c"})
+	})
+
+	c.Run("Idempotent", func(c *qt.C) {
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+		r.DeleteAt(1)
+		r.PurgeTombstones(alwaysGC)
+		r.CompactPhantoms()
+
+		c.Assert(r.CompactPhantoms(), qt.Equals, 0)
+	})
+}
+
+func TestSnapshotRoundTrip(t *testing.T) {
+	c := qt.New(t)
+
+	codec := SnapshotCodec[string]{
+		StateCodec: dotcontext.CausalCodec[*dotcontext.DotFun[Node[string]]]{
+			StoreCodec: dotcontext.DotFunCodec[Node[string]]{
+				ValueCodec: NodeCodec[string]{ValueCodec: dotcontext.StringCodec{}},
+			},
+		},
+	}
+
+	c.Run("NoPhantoms", func(c *qt.C) {
+		r := New[string]("a")
+		r.InsertAt(0, "hello")
+		r.InsertAt(1, "world")
+
+		var buf bytes.Buffer
+		c.Assert(codec.Encode(&buf, r.Snapshot()), qt.IsNil)
+
+		snap, err := codec.Decode(&buf)
+		c.Assert(err, qt.IsNil)
+
+		got := FromSnapshot[string](snap)
+		c.Assert(values(got.Elements()), qt.DeepEquals, []string{"hello", "world"})
+		c.Assert(got.PhantomCount(), qt.Equals, 0)
+	})
+
+	c.Run("WithPhantoms", func(c *qt.C) {
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+		r.InsertAt(2, "c")
+
+		r.DeleteAt(1) // tombstone b
+		r.PurgeTombstones(func(dotcontext.Dot) bool { return true })
+
+		orderBefore := values(r.Elements())
+		c.Assert(orderBefore, qt.DeepEquals, []string{"a", "c"})
+		c.Assert(r.PhantomCount(), qt.Equals, 1)
+
+		var buf bytes.Buffer
+		c.Assert(codec.Encode(&buf, r.Snapshot()), qt.IsNil)
+
+		snap, err := codec.Decode(&buf)
+		c.Assert(err, qt.IsNil)
+
+		got := FromSnapshot[string](snap)
+		c.Assert(got.PhantomCount(), qt.Equals, 1)
+		c.Assert(values(got.Elements()), qt.DeepEquals, orderBefore)
+	})
+
+	c.Run("PhantomChainSurvives", func(c *qt.C) {
+		// a → b → c → d. Delete b, c. GC both.
+		// Phantoms: b(→a), c(→b). d.After = c → chain through phantoms.
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+		r.InsertAt(2, "c")
+		r.InsertAt(3, "d")
+
+		r.DeleteAt(1) // b
+		r.DeleteAt(1) // c (shifted)
+		r.PurgeTombstones(func(dotcontext.Dot) bool { return true })
+
+		orderBefore := values(r.Elements())
+		c.Assert(orderBefore, qt.DeepEquals, []string{"a", "d"})
+		c.Assert(r.PhantomCount(), qt.Equals, 2)
+
+		var buf bytes.Buffer
+		c.Assert(codec.Encode(&buf, r.Snapshot()), qt.IsNil)
+
+		snap, err := codec.Decode(&buf)
+		c.Assert(err, qt.IsNil)
+
+		got := FromSnapshot[string](snap)
+		c.Assert(got.PhantomCount(), qt.Equals, 2)
+		c.Assert(values(got.Elements()), qt.DeepEquals, orderBefore)
+	})
+
+	c.Run("EmptyRGA", func(c *qt.C) {
+		r := New[string]("a")
+
+		var buf bytes.Buffer
+		c.Assert(codec.Encode(&buf, r.Snapshot()), qt.IsNil)
+
+		snap, err := codec.Decode(&buf)
+		c.Assert(err, qt.IsNil)
+
+		got := FromSnapshot[string](snap)
+		c.Assert(got.Len(), qt.Equals, 0)
+		c.Assert(got.PhantomCount(), qt.Equals, 0)
+	})
+}
+
 func TestCodecRoundTrip(t *testing.T) {
 	c := qt.New(t)
 

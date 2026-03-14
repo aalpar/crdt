@@ -224,14 +224,102 @@ func (r *RGA[E]) PhantomCount() int {
 	return len(r.gcAfter)
 }
 
-// State returns the RGA's internal Causal state for serialization.
+// CompactPhantoms removes phantom entries that are no longer
+// referenced by any DotFun entry or other phantom. Removing a
+// phantom can make its parent phantom unreferenced, so removals
+// cascade via a work queue in O(N).
 //
-// Note: the gcAfter phantom map is not included in the serialized
-// state. A full state snapshot followed by deserialization will lose
-// phantom entries. Nodes whose After points to a purged dot must be
-// re-parented before serialization if full state transfer is needed.
+// Call this after confirming all peers are caught up (Status shows
+// Behind == 0 for all peers). If a peer later sends an operation
+// referencing a compacted phantom, the node would be orphaned.
+func (r *RGA[E]) CompactPhantoms() int {
+	if len(r.gcAfter) == 0 {
+		return 0
+	}
+
+	// Count references to each phantom.
+	refCount := make(map[dotcontext.Dot]int, len(r.gcAfter))
+	r.state.Store.Range(func(_ dotcontext.Dot, n Node[E]) bool {
+		if _, isPhantom := r.gcAfter[n.After]; isPhantom {
+			refCount[n.After]++
+		}
+		return true
+	})
+	for _, after := range r.gcAfter {
+		if _, isPhantom := r.gcAfter[after]; isPhantom {
+			refCount[after]++
+		}
+	}
+
+	// Seed queue with unreferenced phantoms.
+	var queue []dotcontext.Dot
+	for d := range r.gcAfter {
+		if refCount[d] == 0 {
+			queue = append(queue, d)
+		}
+	}
+
+	// Remove unreferenced, cascading to parents.
+	var removed int
+	for len(queue) > 0 {
+		d := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+
+		parent := r.gcAfter[d]
+		delete(r.gcAfter, d)
+		removed++
+
+		if _, isPhantom := r.gcAfter[parent]; isPhantom {
+			refCount[parent]--
+			if refCount[parent] == 0 {
+				queue = append(queue, parent)
+			}
+		}
+	}
+
+	if len(r.gcAfter) == 0 {
+		r.gcAfter = nil
+	}
+	return removed
+}
+
+// State returns the RGA's internal Causal state for delta
+// serialization. For full state snapshots (persistence, state
+// transfer), use Snapshot() instead — it includes phantom entries.
 func (r *RGA[E]) State() dotcontext.Causal[*dotcontext.DotFun[Node[E]]] {
 	return r.state
+}
+
+// Snapshot captures the full RGA state including phantom entries
+// for persistence or full state transfer. Use FromSnapshot to
+// restore.
+type Snapshot[E comparable] struct {
+	State    dotcontext.Causal[*dotcontext.DotFun[Node[E]]]
+	Phantoms map[dotcontext.Dot]dotcontext.Dot
+}
+
+// Snapshot returns a full state capture including phantom entries.
+func (r *RGA[E]) Snapshot() Snapshot[E] {
+	var phantoms map[dotcontext.Dot]dotcontext.Dot
+	if len(r.gcAfter) > 0 {
+		phantoms = make(map[dotcontext.Dot]dotcontext.Dot, len(r.gcAfter))
+		for d, after := range r.gcAfter {
+			phantoms[d] = after
+		}
+	}
+	return Snapshot[E]{
+		State:    r.state,
+		Phantoms: phantoms,
+	}
+}
+
+// FromSnapshot reconstructs an RGA from a full state snapshot.
+func FromSnapshot[E comparable](s Snapshot[E]) *RGA[E] {
+	r := &RGA[E]{state: s.State}
+	if len(s.Phantoms) > 0 {
+		r.gcAfter = s.Phantoms
+	}
+	return r
 }
 
 // FromCausal constructs an RGA from a decoded Causal value.
@@ -320,6 +408,62 @@ func (c NodeCodec[E]) Decode(r io.Reader) (Node[E], error) {
 		return Node[E]{}, err
 	}
 	return Node[E]{Value: val, After: after, Deleted: b[0] != 0}, nil
+}
+
+// SnapshotCodec encodes a Snapshot[E] as:
+// [Causal state] [uint64 phantom count] ([Dot key][Dot value])...
+type SnapshotCodec[E comparable] struct {
+	StateCodec dotcontext.CausalCodec[*dotcontext.DotFun[Node[E]]]
+}
+
+func (c SnapshotCodec[E]) Encode(w io.Writer, s Snapshot[E]) error {
+	if err := c.StateCodec.Encode(w, s.State); err != nil {
+		return err
+	}
+	if err := (dotcontext.Uint64Codec{}).Encode(w, uint64(len(s.Phantoms))); err != nil {
+		return err
+	}
+	dc := dotcontext.DotCodec{}
+	for d, after := range s.Phantoms {
+		if err := dc.Encode(w, d); err != nil {
+			return err
+		}
+		if err := dc.Encode(w, after); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c SnapshotCodec[E]) Decode(r io.Reader) (Snapshot[E], error) {
+	state, err := c.StateCodec.Decode(r)
+	if err != nil {
+		return Snapshot[E]{}, err
+	}
+	n, err := (dotcontext.Uint64Codec{}).Decode(r)
+	if err != nil {
+		return Snapshot[E]{}, err
+	}
+	var phantoms map[dotcontext.Dot]dotcontext.Dot
+	if n > 0 {
+		phantoms = make(map[dotcontext.Dot]dotcontext.Dot, n)
+		dc := dotcontext.DotCodec{}
+		for range n {
+			d, err := dc.Decode(r)
+			if err != nil {
+				return Snapshot[E]{}, err
+			}
+			after, err := dc.Decode(r)
+			if err != nil {
+				return Snapshot[E]{}, err
+			}
+			phantoms[d] = after
+		}
+	}
+	return Snapshot[E]{
+		State:    state,
+		Phantoms: phantoms,
+	}, nil
 }
 
 func (r *RGA[E]) emptyDelta() *RGA[E] {
