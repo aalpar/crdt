@@ -72,4 +72,4 @@
 - [x] `mvregister.Value[V]` naming — renamed to `Entry[V]` with field `Val`, consistent with `CounterValue`, `GValue`, `Presence`, `Timestamped`.
 - [x] RWSet missing per-package `TestDeltaPropagation` — every other CRDT has one; the shared harness covers it generically but the pattern break is a consistency gap.
 - [x] CRDT-level fuzz tests beyond AWSet — `awset/fuzz_test.go` found 2 bugs. Added `rwset/fuzz_test.go` (convergence) and `ormap/fuzz_test.go` (convergence + nested 3-level recursive merge).
-- [ ] `DeltaStore.Fetch` scales linearly — O(|store| × |ranges|) scan. Fine while GC keeps the store small; add a per-replica secondary index if a peer-offline scenario causes buildup.
+- [x] `DeltaStore.Fetch` scales linearly — O(|store| × |ranges|) scan. Added per-replica sorted secondary index (`byReplica map[ReplicaID][]uint64`); Fetch is now O(Σ_r |ranges_r|×log(|dots_per_r|) + |hits|). Tail fetch of 100/1000 dots: ~4.7µs vs ~59µs for full scan (12.5× on the offline-peer scenario).

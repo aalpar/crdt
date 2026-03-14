@@ -318,6 +318,40 @@ func BenchmarkMergeDotMap(b *testing.B) {
 	}
 }
 
+// BenchmarkDeltaStoreFetch measures Fetch with a per-replica sorted index.
+// "full" fetches all dots in one range; "tail" fetches only the last 10%,
+// highlighting the index benefit when the store is large but the range is small.
+func BenchmarkDeltaStoreFetch(b *testing.B) {
+	for _, nDots := range []int{100, 1000} {
+		b.Run(fmt.Sprintf("full/%d", nDots), func(b *testing.B) {
+			s := NewDeltaStore[int]()
+			for i := range nDots {
+				s.Add(Dot{ID: "a", Seq: uint64(i + 1)}, i)
+			}
+			missing := map[ReplicaID][]SeqRange{
+				"a": {{Lo: 1, Hi: uint64(nDots)}},
+			}
+			for b.Loop() {
+				s.Fetch(missing)
+			}
+		})
+		b.Run(fmt.Sprintf("tail/%d", nDots), func(b *testing.B) {
+			s := NewDeltaStore[int]()
+			for i := range nDots {
+				s.Add(Dot{ID: "a", Seq: uint64(i + 1)}, i)
+			}
+			// Fetch only the last 10%: old scan pays N, new pays log(N)+hits.
+			lo := uint64(nDots*9/10 + 1)
+			missing := map[ReplicaID][]SeqRange{
+				"a": {{Lo: lo, Hi: uint64(nDots)}},
+			}
+			for b.Loop() {
+				s.Fetch(missing)
+			}
+		})
+	}
+}
+
 // BenchmarkMergeDotMapTinyDelta measures the replication hot path:
 // merging a 1-key delta into a large state.
 func BenchmarkMergeDotMapTinyDelta(b *testing.B) {
