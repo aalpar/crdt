@@ -361,6 +361,194 @@ func TestStateRoundTrip(t *testing.T) {
 	})
 }
 
+func values[E comparable](elems []Element[E]) []E {
+	result := make([]E, len(elems))
+	for i, e := range elems {
+		result[i] = e.Value
+	}
+	return result
+}
+
+func TestPurgeTombstones(t *testing.T) {
+	c := qt.New(t)
+
+	alwaysGC := func(dotcontext.Dot) bool { return true }
+
+	c.Run("EmptyRGA", func(c *qt.C) {
+		r := New[string]("a")
+		n := r.PurgeTombstones(alwaysGC)
+		c.Assert(n, qt.Equals, 0)
+		c.Assert(r.PhantomCount(), qt.Equals, 0)
+	})
+
+	c.Run("NoTombstones", func(c *qt.C) {
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+
+		n := r.PurgeTombstones(alwaysGC)
+		c.Assert(n, qt.Equals, 0)
+		c.Assert(r.TombstoneCount(), qt.Equals, 0)
+	})
+
+	c.Run("LeafTombstone", func(c *qt.C) {
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+		r.InsertAt(2, "c")
+
+		r.DeleteAt(2)
+		c.Assert(r.TombstoneCount(), qt.Equals, 1)
+
+		n := r.PurgeTombstones(alwaysGC)
+		c.Assert(n, qt.Equals, 1)
+		c.Assert(r.TombstoneCount(), qt.Equals, 0)
+		c.Assert(r.PhantomCount(), qt.Equals, 1)
+
+		c.Assert(values(r.Elements()), qt.DeepEquals, []string{"a", "b"})
+	})
+
+	c.Run("InteriorTombstonePreservesOrder", func(c *qt.C) {
+		// Chain: a → b → c. Delete b (interior). GC b.
+		// Visible order must remain [a, c], not change.
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+		r.InsertAt(2, "c")
+
+		r.DeleteAt(1)
+		c.Assert(values(r.Elements()), qt.DeepEquals, []string{"a", "c"})
+
+		n := r.PurgeTombstones(alwaysGC)
+		c.Assert(n, qt.Equals, 1)
+		c.Assert(values(r.Elements()), qt.DeepEquals, []string{"a", "c"})
+	})
+
+	c.Run("ConcurrentInsertsPreserveOrder", func(c *qt.C) {
+		// The critical case: naive re-parenting would reorder.
+		//
+		// Setup: P at head. E and D are concurrent children of P.
+		// E sorts before D (higher seq). C is a child of D.
+		// Tree:  P → [E(seq2), D(seq1)], D → [C(seq3)]
+		// Visible after deleting D: P, E, C
+		// After GC(D) with phantoms:  P, E, C  ← order preserved
+		// After GC(D) with re-parent: P, C, E  ← WRONG
+		a := New[string]("a")
+		b := New[string]("b")
+
+		// P inserted by a.
+		pDelta := a.InsertAfter(dotcontext.Dot{}, "P")
+		b.Merge(pDelta)
+		pDot := a.Elements()[0].ID
+
+		// Concurrent: b inserts D after P, a inserts E after P.
+		// b gets dot b:1 (seq 1), a gets dot a:2 (seq 2).
+		// E(seq 2) > D(seq 1) in sibling sort → E before D.
+		dDelta := b.InsertAfter(pDot, "D")
+		eDelta := a.InsertAfter(pDot, "E")
+
+		a.Merge(dDelta)
+		b.Merge(eDelta)
+
+		// a now has: P, E, D (E first — higher seq).
+		c.Assert(values(a.Elements()), qt.DeepEquals, []string{"P", "E", "D"})
+
+		dDot := a.Elements()[2].ID // D is at index 2
+
+		// C inserted after D by a.
+		cDelta := a.InsertAfter(dDot, "C")
+		b.Merge(cDelta)
+
+		// Order: P, E, D, C.
+		c.Assert(values(a.Elements()), qt.DeepEquals, []string{"P", "E", "D", "C"})
+
+		// Delete D.
+		a.Delete(dDot)
+		orderAfterDelete := values(a.Elements())
+		c.Assert(orderAfterDelete, qt.DeepEquals, []string{"P", "E", "C"})
+
+		// GC D — must preserve order.
+		n := a.PurgeTombstones(alwaysGC)
+		c.Assert(n, qt.Equals, 1)
+		c.Assert(values(a.Elements()), qt.DeepEquals, orderAfterDelete)
+	})
+
+	c.Run("TombstoneChain", func(c *qt.C) {
+		// Chain: a → b → c → d → e. Delete b, c, d.
+		// GC all three. Phantoms chain: b→a, c→b, d→c.
+		// Visible: a, e — preserved through the chain.
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+		r.InsertAt(2, "c")
+		r.InsertAt(3, "d")
+		r.InsertAt(4, "e")
+
+		r.DeleteAt(1) // b
+		r.DeleteAt(1) // c (shifted to index 1)
+		r.DeleteAt(1) // d (shifted to index 1)
+
+		c.Assert(values(r.Elements()), qt.DeepEquals, []string{"a", "e"})
+		c.Assert(r.TombstoneCount(), qt.Equals, 3)
+
+		n := r.PurgeTombstones(alwaysGC)
+		c.Assert(n, qt.Equals, 3)
+		c.Assert(r.PhantomCount(), qt.Equals, 3)
+		c.Assert(values(r.Elements()), qt.DeepEquals, []string{"a", "e"})
+	})
+
+	c.Run("CanGCPredicate", func(c *qt.C) {
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+		r.InsertAt(2, "c")
+
+		bDot := r.Elements()[1].ID
+		cDot := r.Elements()[2].ID
+		r.Delete(bDot)
+		r.Delete(cDot)
+
+		// Only allow GC of c.
+		n := r.PurgeTombstones(func(d dotcontext.Dot) bool {
+			return d == cDot
+		})
+		c.Assert(n, qt.Equals, 1)
+		c.Assert(r.TombstoneCount(), qt.Equals, 1) // b still tombstoned
+		c.Assert(r.PhantomCount(), qt.Equals, 1)    // c is phantom
+	})
+
+	c.Run("InsertAfterGCedDot", func(c *qt.C) {
+		// A remote might reference a GCed dot as an After target.
+		// The phantom entry ensures correct placement.
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+		r.InsertAt(2, "c")
+
+		bDot := r.Elements()[1].ID
+		r.Delete(bDot)
+		r.PurgeTombstones(alwaysGC)
+
+		// Insert after the GCed dot.
+		r.InsertAfter(bDot, "x")
+
+		elems := r.Elements()
+		c.Assert(elems, qt.HasLen, 3)
+		c.Assert(values(elems), qt.DeepEquals, []string{"a", "x", "c"})
+	})
+
+	c.Run("PurgeIdempotent", func(c *qt.C) {
+		r := New[string]("a")
+		r.InsertAt(0, "a")
+		r.InsertAt(1, "b")
+		r.DeleteAt(1)
+
+		r.PurgeTombstones(alwaysGC)
+		n := r.PurgeTombstones(alwaysGC) // second call: nothing to purge
+		c.Assert(n, qt.Equals, 0)
+	})
+}
+
 func TestCodecRoundTrip(t *testing.T) {
 	c := qt.New(t)
 

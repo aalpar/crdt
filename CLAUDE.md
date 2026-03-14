@@ -59,7 +59,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 | `ewflag/` | `EWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → enable wins |
 | `dwflag/` | `DWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → disable wins |
 | `mvregister/` | `MVRegister[V]` | `DotFun[Entry[V]]` | All concurrent writes preserved |
-| `rga/` | `RGA[E]` | `DotFun[Node[E]]` | Concurrent inserts ordered by dot; tombstone anchoring |
+| `rga/` | `RGA[E]` | `DotFun[Node[E]]` | Concurrent inserts ordered by dot; tombstone GC via phantom anchoring |
 
 ### Key Design Decisions
 
@@ -74,6 +74,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 - `DotMap.Clone()` is deep — calls `v.CloneStore().(V)` per entry; `DotSet.Clone()` and `DotFun.Clone()` are also deep. The `CloneStore() DotStore` method on the interface enables recursive cloning without type switches.
 - `JoinDotMap` pre-computes a single `emptyV()` and reuses it for all key-misses (join functions never mutate inputs)
 - `pncounter` and `gcounter` share the same find-own-dot/replace/build-delta pattern (int64 vs uint64); cross-referenced via NOTE comments
+- `RGA.PurgeTombstones` uses phantom entries (`gcAfter map[Dot]Dot`) instead of re-parenting — naive re-parenting breaks sibling sort order. Phantoms occupy their original tree position but are skipped in DFS output. `DeltaStore` secondary index uses `byReplica map[ReplicaID][]uint64` for O(log n) Fetch
 
 ## Package Map
 
@@ -106,7 +107,7 @@ End-to-end tests exercise the full pipeline: mutate → store delta → `WriteDe
 
 ## Testing
 
-- `go test ./...` — 768 tests across all packages
+- `go test ./...` — 918 tests across all packages
 - `go test -race ./...` — race detector
 - `go test -fuzz=FuzzJoinDotSetSemilattice ./dotcontext/` — fuzz semilattice properties
 - `make benchmark` — benchmarks across all packages

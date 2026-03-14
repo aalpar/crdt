@@ -36,9 +36,16 @@ type Element[E comparable] struct {
 // RGA is a Replicated Growable Array. It composes a
 // DotFun[Node[E]] with a causal context to provide an ordered
 // sequence with insert and delete operations.
+//
+// Tombstoned entries can be purged via PurgeTombstones once all
+// replicas have observed the deletion. Purged dots are retained
+// as phantoms (gcAfter) to preserve linearization order — their
+// position in the After-tree remains intact but they are invisible
+// in the output.
 type RGA[E comparable] struct {
-	id    dotcontext.ReplicaID
-	state dotcontext.Causal[*dotcontext.DotFun[Node[E]]]
+	id      dotcontext.ReplicaID
+	state   dotcontext.Causal[*dotcontext.DotFun[Node[E]]]
+	gcAfter map[dotcontext.Dot]dotcontext.Dot // GCed dot → its After pointer
 }
 
 // New creates an empty RGA for the given replica.
@@ -168,7 +175,61 @@ func (r *RGA[E]) Merge(other *RGA[E]) {
 	dotcontext.MergeDotFun(&r.state, other.state)
 }
 
+// PurgeTombstones removes tombstoned entries from the DotFun for dots
+// where canGC returns true. Purged dots are retained as phantoms
+// (After pointer only) to preserve linearization order.
+//
+// The canGC predicate matches PeerTracker.CanGC — the replication
+// layer decides when a dot has been observed by all tracked peers.
+// Returns the number of tombstones purged.
+func (r *RGA[E]) PurgeTombstones(canGC func(dotcontext.Dot) bool) int {
+	// Collect GC candidates (can't modify DotFun during Range).
+	var candidates []dotcontext.Dot
+	r.state.Store.Range(func(d dotcontext.Dot, n Node[E]) bool {
+		if n.Deleted && canGC(d) {
+			candidates = append(candidates, d)
+		}
+		return true
+	})
+	if len(candidates) == 0 {
+		return 0
+	}
+	if r.gcAfter == nil {
+		r.gcAfter = make(map[dotcontext.Dot]dotcontext.Dot, len(candidates))
+	}
+	for _, d := range candidates {
+		node, _ := r.state.Store.Get(d)
+		r.gcAfter[d] = node.After
+		r.state.Store.Remove(d)
+	}
+	return len(candidates)
+}
+
+// TombstoneCount returns the number of tombstoned (deleted but not
+// yet purged) entries in the DotFun.
+func (r *RGA[E]) TombstoneCount() int {
+	count := 0
+	r.state.Store.Range(func(_ dotcontext.Dot, n Node[E]) bool {
+		if n.Deleted {
+			count++
+		}
+		return true
+	})
+	return count
+}
+
+// PhantomCount returns the number of phantom entries retained for
+// linearization order after tombstone GC.
+func (r *RGA[E]) PhantomCount() int {
+	return len(r.gcAfter)
+}
+
 // State returns the RGA's internal Causal state for serialization.
+//
+// Note: the gcAfter phantom map is not included in the serialized
+// state. A full state snapshot followed by deserialization will lose
+// phantom entries. Nodes whose After points to a purged dot must be
+// re-parented before serialization if full state transfer is needed.
 func (r *RGA[E]) State() dotcontext.Causal[*dotcontext.DotFun[Node[E]]] {
 	return r.state
 }
@@ -179,7 +240,10 @@ func FromCausal[E comparable](state dotcontext.Causal[*dotcontext.DotFun[Node[E]
 	return &RGA[E]{state: state}
 }
 
-// linearize returns all dots in sequence order by DFS from the head.
+// linearize returns all live dots in sequence order by DFS from the
+// head. GCed phantom dots participate in the tree (preserving sort
+// position) but are excluded from the output.
+//
 // Children of each parent are sorted: higher Seq first, then higher
 // replica ID first — so newer inserts at the same position appear left.
 func (r *RGA[E]) linearize() []dotcontext.Dot {
@@ -190,9 +254,13 @@ func (r *RGA[E]) linearize() []dotcontext.Dot {
 		return true
 	})
 
+	// Add GCed phantoms to the tree. They occupy their original
+	// position (preserving sibling sort order) but are invisible.
+	for d, after := range r.gcAfter {
+		children[after] = append(children[after], d)
+	}
+
 	// Sort each sibling list: Seq descending, then ID descending.
-	// This puts the highest-priority (newest) insert first in DFS,
-	// which means it appears leftmost.
 	for _, siblings := range children {
 		sort.Slice(siblings, func(i, j int) bool {
 			if siblings[i].Seq != siblings[j].Seq {
@@ -202,13 +270,15 @@ func (r *RGA[E]) linearize() []dotcontext.Dot {
 		})
 	}
 
-	// DFS from head (zero Dot).
+	// DFS from head (zero Dot), skipping phantoms in output.
 	var result []dotcontext.Dot
 	var dfs func(parent dotcontext.Dot)
 	dfs = func(parent dotcontext.Dot) {
 		for _, child := range children[parent] {
-			result = append(result, child)
-			dfs(child)
+			if _, phantom := r.gcAfter[child]; !phantom {
+				result = append(result, child)
+			}
+			dfs(child) // always recurse — phantoms may have live children
 		}
 	}
 	dfs(dotcontext.Dot{})

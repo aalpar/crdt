@@ -11,7 +11,7 @@
 - [x] `SeqRange` type, `MissingCodec`, fuzz round-trip
 - [x] `DeltaStore.Fetch()` composable with `Missing()` return type
 
-768 tests passing across all packages (includes semilattice property checks, fuzz seed corpus).
+918 tests passing across all packages (includes semilattice property checks, fuzz seed corpus).
 
 ## Higher-level CRDTs (compose dotcontext)
 
@@ -73,3 +73,6 @@
 - [x] RWSet missing per-package `TestDeltaPropagation` — every other CRDT has one; the shared harness covers it generically but the pattern break is a consistency gap.
 - [x] CRDT-level fuzz tests beyond AWSet — `awset/fuzz_test.go` found 2 bugs. Added `rwset/fuzz_test.go` (convergence) and `ormap/fuzz_test.go` (convergence + nested 3-level recursive merge).
 - [x] `DeltaStore.Fetch` scales linearly — O(|store| × |ranges|) scan. Added per-replica sorted secondary index (`byReplica map[ReplicaID][]uint64`); Fetch is now O(Σ_r |ranges_r|×log(|dots_per_r|) + |hits|). Tail fetch of 100/1000 dots: ~4.7µs vs ~59µs for full scan (12.5× on the offline-peer scenario).
+- [x] RGA tombstone GC — `PurgeTombstones(canGC func(Dot) bool) int` removes tombstoned entries, retaining phantom After pointers (`gcAfter map[Dot]Dot`) to preserve linearization order. Naive re-parenting breaks sibling sort; phantoms keep the tree identical. 9 tests including concurrent-insert order preservation. Known limitation: `gcAfter` not included in serialized `State()` — full state transfer needs re-parenting or gcAfter serialization.
+- [ ] `gcAfter` phantom compaction — phantoms accumulate indefinitely. Compaction requires proving no future reference can target the phantom dot (needs all peers acked beyond any operation that could reference it). Low priority while `gcAfter` entries are small (two Dots each).
+- [ ] RGA `State()` serialization with phantoms — `gcAfter` is not included in `State()` output. Nodes with After pointing to a purged dot would be orphaned on deserialization. Needs either gcAfter serialization or pre-serialization re-parenting.
