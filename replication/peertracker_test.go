@@ -235,6 +235,139 @@ func TestPeerTrackerCanGC(t *testing.T) {
 	})
 }
 
+func TestPeerTrackerBlockedBy(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("AllObserved", func(c *qt.C) {
+		tr := NewPeerTracker()
+		dot := dotcontext.Dot{ID: "a", Seq: 1}
+		cc := dotcontext.New()
+		cc.Add(dot)
+
+		tr.AddPeer("peer1", cc.Clone())
+		tr.AddPeer("peer2", cc.Clone())
+
+		c.Assert(tr.BlockedBy(dot), qt.IsNil)
+	})
+
+	c.Run("SomeBlocking", func(c *qt.C) {
+		tr := NewPeerTracker()
+		dot := dotcontext.Dot{ID: "a", Seq: 1}
+		has := dotcontext.New()
+		has.Add(dot)
+
+		tr.AddPeer("peer1", has)
+		tr.AddPeer("peer2", nil)
+		tr.AddPeer("peer3", nil)
+
+		blockers := tr.BlockedBy(dot)
+		c.Assert(len(blockers), qt.Equals, 2)
+
+		have := make(map[dotcontext.ReplicaID]bool)
+		for _, id := range blockers {
+			have[id] = true
+		}
+		c.Assert(have["peer2"], qt.IsTrue)
+		c.Assert(have["peer3"], qt.IsTrue)
+	})
+
+	c.Run("NoPeers", func(c *qt.C) {
+		tr := NewPeerTracker()
+		c.Assert(tr.BlockedBy(dotcontext.Dot{ID: "a", Seq: 1}), qt.IsNil)
+	})
+
+	c.Run("ConsistentWithCanGC", func(c *qt.C) {
+		tr := NewPeerTracker()
+		dot := dotcontext.Dot{ID: "a", Seq: 1}
+		has := dotcontext.New()
+		has.Add(dot)
+
+		tr.AddPeer("peer1", has)
+		tr.AddPeer("peer2", nil)
+
+		// CanGC false ↔ BlockedBy non-empty.
+		c.Assert(tr.CanGC(dot), qt.IsFalse)
+		c.Assert(len(tr.BlockedBy(dot)) > 0, qt.IsTrue)
+
+		// After ack, CanGC true ↔ BlockedBy nil.
+		tr.Ack("peer2", has)
+		c.Assert(tr.CanGC(dot), qt.IsTrue)
+		c.Assert(tr.BlockedBy(dot), qt.IsNil)
+	})
+}
+
+func TestPeerTrackerStatus(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("AllCaughtUp", func(c *qt.C) {
+		tr := NewPeerTracker()
+		local := dotcontext.New()
+		local.Next("a")
+
+		tr.AddPeer("peer1", local.Clone())
+
+		statuses := tr.Status(local)
+		c.Assert(statuses, qt.HasLen, 1)
+		c.Assert(statuses[0].Behind, qt.Equals, 0)
+		c.Assert(statuses[0].Pending, qt.IsNil)
+	})
+
+	c.Run("PeerBehind", func(c *qt.C) {
+		tr := NewPeerTracker()
+		tr.AddPeer("peer1", nil)
+
+		local := dotcontext.New()
+		local.Next("a") // a:1
+		local.Next("a") // a:2
+		local.Next("a") // a:3
+
+		statuses := tr.Status(local)
+		c.Assert(statuses, qt.HasLen, 1)
+		c.Assert(statuses[0].ID, qt.Equals, dotcontext.ReplicaID("peer1"))
+		c.Assert(statuses[0].Behind, qt.Equals, 3)
+	})
+
+	c.Run("MultiplePeersMixedLag", func(c *qt.C) {
+		tr := NewPeerTracker()
+
+		local := dotcontext.New()
+		local.Next("a") // a:1
+		local.Next("a") // a:2
+		local.Next("a") // a:3
+		local.Next("b") // b:1
+
+		// peer1 has a:1..2 (missing a:3 + b:1 → 2 behind).
+		cc1 := dotcontext.New()
+		cc1.Add(dotcontext.Dot{ID: "a", Seq: 1})
+		cc1.Add(dotcontext.Dot{ID: "a", Seq: 2})
+		cc1.Compact()
+		tr.AddPeer("peer1", cc1)
+
+		// peer2 fully caught up.
+		tr.AddPeer("peer2", local.Clone())
+
+		statuses := tr.Status(local)
+		c.Assert(statuses, qt.HasLen, 2)
+
+		byID := make(map[dotcontext.ReplicaID]PeerStatus)
+		for _, s := range statuses {
+			byID[s.ID] = s
+		}
+
+		c.Assert(byID["peer1"].Behind, qt.Equals, 2)
+		c.Assert(byID["peer2"].Behind, qt.Equals, 0)
+	})
+
+	c.Run("NoPeers", func(c *qt.C) {
+		tr := NewPeerTracker()
+		local := dotcontext.New()
+		local.Next("a")
+
+		statuses := tr.Status(local)
+		c.Assert(statuses, qt.HasLen, 0)
+	})
+}
+
 func TestPeerTrackerPending(t *testing.T) {
 	c := qt.New(t)
 

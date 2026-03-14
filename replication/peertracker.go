@@ -81,3 +81,47 @@ func (t *PeerTracker) CanGC(d dotcontext.Dot) bool {
 	}
 	return true
 }
+
+// BlockedBy returns the peer IDs that have NOT observed the given dot.
+// Returns nil if all peers have observed it (or no peers are registered).
+// This is the diagnostic inverse of CanGC — it answers "who's blocking?"
+// rather than "can I proceed?"
+func (t *PeerTracker) BlockedBy(d dotcontext.Dot) []dotcontext.ReplicaID {
+	var blockers []dotcontext.ReplicaID
+	for id, cc := range t.peers {
+		if !cc.Has(d) {
+			blockers = append(blockers, id)
+		}
+	}
+	return blockers
+}
+
+// PeerStatus reports a single peer's replication lag relative to the
+// local causal context.
+type PeerStatus struct {
+	ID      dotcontext.ReplicaID
+	Pending map[dotcontext.ReplicaID][]dotcontext.SeqRange // what this peer is missing
+	Behind  int                                            // total missing dot count
+}
+
+// Status returns per-peer replication state relative to the local
+// causal context. Every registered peer gets an entry. Peers that
+// are fully caught up have Behind == 0 and Pending == nil.
+func (t *PeerTracker) Status(local *dotcontext.CausalContext) []PeerStatus {
+	result := make([]PeerStatus, 0, len(t.peers))
+	for id, cc := range t.peers {
+		pending := cc.Missing(local)
+		var behind int
+		for _, ranges := range pending {
+			for _, r := range ranges {
+				behind += int(r.Hi-r.Lo) + 1
+			}
+		}
+		result = append(result, PeerStatus{
+			ID:      id,
+			Pending: pending,
+			Behind:  behind,
+		})
+	}
+	return result
+}
