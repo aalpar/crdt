@@ -28,6 +28,8 @@
 - [x] `dwflag` — disable-wins flag (complement of ewflag)
 - [x] `rwset` — remove-wins observed-remove set (dual of AWSet)
 - [x] `rga` — replicated growable array (`DotFun[Node[E]]`, immutable elements, tombstone ordering)
+- [x] `gset` — grow-only set (no causal context; merge = set union)
+- [x] `lwweset` — LWW element set (per-element timestamp; add-wins on equal timestamps)
 
 ## Optimization
 
