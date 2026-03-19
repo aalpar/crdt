@@ -59,7 +59,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 | `ewflag/` | `EWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → enable wins |
 | `dwflag/` | `DWFlag` | `Causal[*DotSet]` | Concurrent enable+disable → disable wins |
 | `mvregister/` | `MVRegister[V]` | `DotFun[Entry[V]]` | All concurrent writes preserved |
-| `rga/` | `RGA[E]` | `DotFun[Node[E]]` | Concurrent inserts ordered by dot; tombstone GC via phantom anchoring |
+| `rga/` | `RGA[E]` | `DotFun[Node[E]]` | Concurrent inserts ordered by dot; tombstone GC via phantom anchoring; snapshot serialization |
 
 ### Key Design Decisions
 
@@ -74,7 +74,7 @@ Each composes dotcontext types. Mutators return deltas for replication.
 - `DotMap.Clone()` is deep — calls `v.CloneStore().(V)` per entry; `DotSet.Clone()` and `DotFun.Clone()` are also deep. The `CloneStore() DotStore` method on the interface enables recursive cloning without type switches.
 - `JoinDotMap` pre-computes a single `emptyV()` and reuses it for all key-misses (join functions never mutate inputs)
 - `pncounter` and `gcounter` share the same find-own-dot/replace/build-delta pattern (int64 vs uint64); cross-referenced via NOTE comments
-- `RGA.PurgeTombstones` uses phantom entries (`gcAfter map[Dot]Dot`) instead of re-parenting — naive re-parenting breaks sibling sort order. Phantoms occupy their original tree position but are skipped in DFS output. `DeltaStore` secondary index uses `byReplica map[ReplicaID][]uint64` for O(log n) Fetch
+- `RGA.PurgeTombstones` uses phantom entries (`gcAfter map[Dot]Dot`) instead of re-parenting — naive re-parenting breaks sibling sort order. Phantoms occupy their original tree position but are skipped in DFS output. `CompactPhantoms()` removes phantoms no longer needed as position anchors. `Snapshot()`/`FromSnapshot()` serialize full state including phantoms; `State()` omits them (for delta replication only). `SnapshotCodec` handles wire encoding. `DeltaStore` secondary index uses `byReplica map[ReplicaID][]uint64` for O(log n) Fetch
 
 ## Package Map
 
@@ -82,20 +82,22 @@ Each composes dotcontext types. Mutators return deltas for replication.
 |---------|-----------|-------|
 | `dotcontext/` | Dot, CausalContext, DotSet, DotFun, DotMap, Causal, DecodeLimitError | 12 source + 12 test |
 | `crdttest/` | Harness[T] | 1 source (test-only shared property tests) |
-| `awset/` | AWSet | 2 source + 3 test |
-| `rwset/` | RWSet, Presence | 2 source + 2 test |
+| `awset/` | AWSet | 2 source + 4 test |
+| `rwset/` | RWSet, Presence | 2 source + 3 test |
 | `lwwregister/` | LWWRegister | 2 source + 2 test |
 | `pncounter/` | Counter | 2 source + 2 test |
 | `gcounter/` | Counter, GValue | 2 source + 2 test |
-| `ormap/` | ORMap | 2 source + 2 test |
+| `ormap/` | ORMap | 2 source + 3 test |
 | `ewflag/` | EWFlag | 2 source + 2 test |
 | `dwflag/` | DWFlag | 2 source + 2 test |
 | `mvregister/` | MVRegister | 2 source + 2 test |
-| `rga/` | RGA, Node, Element | 2 source + 2 test |
+| `rga/` | RGA, Node, Element, Snapshot, SnapshotCodec | 2 source + 2 test |
 | `gset/` | GSet | 2 source + 2 test |
 | `lwweset/` | LWWESet | 2 source + 2 test |
-| `replication/` | PeerTracker, GC, WriteDeltaBatch | 4 source + 4 test |
+| `replication/` | PeerTracker, PeerStatus, GC, WriteDeltaBatch | 4 source + 4 test |
 | `transport/` | Conn, Transport, Handler, PeerError | 3 source + 3 test |
+| `cmd/demo/` | — | 1 source (scenario demos for interactive validation) |
+| `cmd/repl/` | Replica | 2 source + 1 test (interactive REPL, partition simulation) |
 
 ### Shared Test Harness: `crdttest/`
 
@@ -103,13 +105,13 @@ Each composes dotcontext types. Mutators return deltas for replication.
 
 ### E2E Replication Tests: `replication/e2e_test.go`
 
-End-to-end tests exercise the full pipeline: mutate → store delta → `WriteDeltaBatch` → `ReadDeltaBatch` → Merge → Ack → GC. Covered CRDTs: AWSet, RWSet, LWWRegister, PNCounter, EWFlag, ORMap, MVRegister. Not yet covered: DWFlag, GCounter (structurally identical to tested EWFlag/PNCounter).
+19 end-to-end tests exercise the full pipeline: mutate → store delta → `WriteDeltaBatch` → `ReadDeltaBatch` → Merge → Ack → GC. Covered CRDTs: AWSet, RWSet, LWWRegister, PNCounter, EWFlag, ORMap, MVRegister. Not yet covered: DWFlag, GCounter, GSet, LWWESet (structurally identical to tested types).
 
 ## Testing
 
-- `go test ./...` — 918 tests across all packages
+- `go test ./...` — 940 tests across all packages
 - `go test -race ./...` — race detector
-- `go test -fuzz=FuzzJoinDotSetSemilattice ./dotcontext/` — fuzz semilattice properties
+- `go test -fuzz=FuzzJoinDotSetSemilattice ./dotcontext/` — fuzz semilattice properties (also in `awset/`, `rwset/`, `ormap/`)
 - `make benchmark` — benchmarks across all packages
 - `make profile` — CPU + memory profiles to `profiles/` (default: `dotcontext/`, override: `PROF_PKG=./awset/ make profile`)
 - **After changes**: `make lint && make && make test`
